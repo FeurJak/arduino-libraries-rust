@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# Arduino LED Matrix Library for Rust/Zephyr
+#
+# A Rust port of the Arduino_LED_Matrix C library for the Arduino Uno Q.
+# This library provides control over the 8x13 (104 LEDs) matrix display
+# on the Arduino Uno Q board.
+
+[package]
+name = "arduino-led-matrix"
+version = "0.1.0"
+edition = "2021"
+description = "Rust library for controlling the LED matrix on Arduino Uno Q"
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/FeurJak/arduino-libraries-rust"
+keywords = ["arduino", "led-matrix", "zephyr", "embedded", "no-std"]
+categories = ["embedded", "no-std", "hardware-support"]
+
+[lib]
+name = "arduino_led_matrix"
+crate-type = ["rlib"]
+
+[dependencies]
+# No external dependencies - uses FFI to Zephyr C functions
+
+[features]
+default = []
