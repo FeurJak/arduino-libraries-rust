@@ -1,0 +1,30 @@
+[package]
+name = "arduino-rpc-client"
+version = "0.1.0"
+edition = "2021"
+description = "RPC client for communicating with Arduino Uno Q MCU from Linux"
+license = "Apache-2.0 OR MIT"
+authors = ["Arduino Rust Team"]
+
+[dependencies]
+# MessagePack
+rmp-serde = "1.3"
+rmpv = { version = "1.3", features = ["with-serde"] }
+serde = { version = "1.0", features = ["derive"] }
+
+# Async runtime
+tokio = { version = "1", features = ["io-util", "net", "sync", "time", "rt-multi-thread"] }
+
+# Error handling
+thiserror = "2.0"
+
+# Logging
+log = "0.4"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "macros"] }
+env_logger = "0.11"
+
+[[example]]
+name = "rpc_test"
+path = "examples/rpc_test.rs"

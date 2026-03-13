@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# Arduino RPC Bridge Library for Rust/Zephyr
+#
+# A Rust implementation of the Arduino RouterBridge RPC system for
+# communication between the STM32U585 MCU and QRB2210 Linux MPU
+# on the Arduino Uno Q board.
+
+[package]
+name = "arduino-rpc-bridge"
+version = "0.1.0"
+edition = "2021"
+description = "Rust RPC bridge for Arduino Uno Q MCU-MPU communication"
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/FeurJak/arduino-libraries-rust"
+keywords = ["arduino", "rpc", "messagepack", "zephyr", "embedded", "no-std"]
+categories = ["embedded", "no-std", "hardware-support"]
+
+[lib]
+name = "arduino_rpc_bridge"
+crate-type = ["rlib"]
+
+[dependencies]
+# No external dependencies - pure Rust no_std implementation
+
+[features]
+default = []
