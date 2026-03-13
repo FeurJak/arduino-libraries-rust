@@ -132,6 +132,7 @@ make flash
 The weather-display example demonstrates the full RPC system by fetching real weather data and displaying it on the LED matrix.
 
 **Prerequisites:**
+
 1. Flash the `rpc-server` firmware to the MCU
 2. Ensure `arduino-spi-router` is running on Linux (auto-starts via systemd)
 
@@ -159,6 +160,7 @@ make run-linux APP=weather-display ARGS='--interval 300'
 ```
 
 **Weather display options:**
+
 ```
 --lat <LAT>       Latitude (default: 37.7749, San Francisco)
 --lon <LON>       Longitude (default: -122.4194)
@@ -278,7 +280,6 @@ adb shell
 
 # Via SSH
 ssh arduino@<board-ip>
-# Password: Asdfqwer1!
 ```
 
 ### First-Time Setup

@@ -35,7 +35,7 @@ APP ?= led-matrix
 # Board connection settings (can override with environment variables)
 BOARD_IP ?= 192.168.1.199
 BOARD_USER ?= arduino
-BOARD_PASS ?= Asdfqwer1!
+BOARD_PASS ?= password
 
 # Linux app configuration
 LINUX_TARGET := aarch64-unknown-linux-gnu
@@ -45,17 +45,17 @@ ifeq ($(APP),led-matrix)
     APP_DIR := examples/led-matrix-demo
     LIB_NAME := arduino-led-matrix
     LIB_PATH_PATTERN := ../../arduino-led-matrix
-    MULTI_LIB := 
+    MULTI_LIB :=
 else ifeq ($(APP),rpc)
     APP_DIR := examples/rpc-demo
     LIB_NAME := arduino-rpc-bridge
     LIB_PATH_PATTERN := ../../arduino-rpc-bridge
-    MULTI_LIB := 
+    MULTI_LIB :=
 else ifeq ($(APP),spi-test)
     APP_DIR := examples/spi-test
-    LIB_NAME := 
-    LIB_PATH_PATTERN := 
-    MULTI_LIB := 
+    LIB_NAME :=
+    LIB_PATH_PATTERN :=
+    MULTI_LIB :=
 else ifeq ($(APP),rpc-server)
     APP_DIR := examples/rpc-server
     LIB_NAME := arduino-led-matrix arduino-rpc-bridge
