@@ -326,6 +326,60 @@ crypto::destroy_key(generated_id)?;
 let key_id = crypto::generate_aes256_key(0x0001_0002)?;
 ```
 
+### PSA + SAGA/X-Wing Persistence Example
+
+Store SAGA credentials and X-Wing keys persistently so they survive reboots:
+
+```rust
+use arduino_cryptography::psa::{self, its, StorageFlags};
+use arduino_cryptography::{saga, xwing, rng::HwRng};
+
+let mut rng = HwRng::new();
+
+// Initialize PSA
+psa::crypto::init()?;
+
+// === Store SAGA Credential ===
+// Application-defined UIDs (leave UID allocation to your app!)
+const SAGA_TAG_UID: psa::StorageUid = 0x0002_0001;
+
+// Create and issue a credential
+let keypair = saga::KeyPair::setup(&mut rng, 2)?;
+let credential = keypair.mac(&mut rng, &messages[..2])?;
+
+// Serialize and store (encrypted at rest)
+let tag_bytes = credential.to_bytes();
+its::set(SAGA_TAG_UID, &tag_bytes, StorageFlags::NONE)?;
+
+// Later (e.g., after reboot), load and deserialize
+let mut loaded = [0u8; saga::TAG_SIZE];
+its::get(SAGA_TAG_UID, 0, &mut loaded)?;
+let loaded_credential = saga::Tag::from_bytes(&loaded).unwrap();
+
+// Credential still works!
+assert!(loaded_credential.verify(keypair.params(), keypair.pk(), &messages[..2]));
+
+// === Store X-Wing Seed ===
+// Only 32 bytes needed - full keypair is regenerated from seed
+const XWING_SEED_UID: psa::StorageUid = 0x0003_0001;
+
+let seed: [u8; 32] = rng.random_array();
+its::set(XWING_SEED_UID, &seed, StorageFlags::NONE)?;
+
+// After reboot, load seed and regenerate keypair
+let loaded_seed: [u8; 32] = its::load(XWING_SEED_UID)?;
+let secret_key = xwing::SecretKey::from_seed(&loaded_seed);
+let public_key = secret_key.public_key();
+
+// Ready for PQ key exchange immediately!
+```
+
+**Key Takeaways:**
+- SAGA credentials (~392 bytes) fit in ITS with default 1280-byte limit
+- X-Wing only needs 32-byte seed stored (not 1.2KB public key)
+- Data encrypted at rest with device-unique key
+- Device ready for auth + PQ key exchange immediately after power-on
+
 ## Hardware RNG Setup
 
 The `HwRng` module requires some setup in your Zephyr project:
@@ -520,7 +574,7 @@ CONFIG_SECURE_STORAGE=y
 CONFIG_SECURE_STORAGE_ITS_IMPLEMENTATION_ZEPHYR=y
 CONFIG_SECURE_STORAGE_ITS_STORE_IMPLEMENTATION_SETTINGS=y
 CONFIG_SECURE_STORAGE_ITS_TRANSFORM_IMPLEMENTATION_AEAD=y
-CONFIG_SECURE_STORAGE_ITS_MAX_DATA_SIZE=512
+CONFIG_SECURE_STORAGE_ITS_MAX_DATA_SIZE=1280
 
 # Storage backends
 CONFIG_SETTINGS=y

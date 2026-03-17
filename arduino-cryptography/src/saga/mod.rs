@@ -57,10 +57,12 @@ mod nizk;
 mod types;
 
 pub use errors::SagaError;
-pub use mac::{Proof, Tag};
-pub use nizk::{Predicate, Presentation};
+pub use mac::{Proof, Tag, PROOF_SIZE, TAG_SIZE};
+pub use nizk::{Predicate, Presentation, PRESENTATION_SIZE};
 pub use types::{
-    KeyPair, Parameters, Point, PointExt, PublicKey, Scalar, ScalarExt, SecretKey, MAX_ATTRS,
+    KeyPair, Parameters, Point, PointExt, PublicKey, Scalar, ScalarExt, SecretKey, KEY_PAIR_SIZE,
+    MAX_ATTRS, NUM_ATTRS_SIZE, PARAMETERS_SIZE, POINT_SIZE, PUBLIC_KEY_SIZE, SCALAR_SIZE,
+    SECRET_KEY_SIZE,
 };
 
 // Re-export Identity trait so users can call Point::identity()

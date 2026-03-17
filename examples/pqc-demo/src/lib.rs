@@ -1744,6 +1744,374 @@ fn handle_psa_demo(_count: usize) -> RpcResult {
     RpcResult::Bool(true)
 }
 
+/// Run PSA Persistence demo on-device
+/// Demonstrates: storing SAGA credentials and X-Wing seeds persistently
+fn handle_persistence_demo(_count: usize) -> RpcResult {
+    warn!("");
+    warn!("========================================");
+    warn!("  PSA Persistence Demo");
+    warn!("  Store SAGA + X-Wing Keys");
+    warn!("  Survive Reboots!");
+    warn!("========================================");
+    warn!("");
+
+    // Initialize hardware RNG
+    let mut rng = HwRng::new();
+
+    // ==========================================
+    // Phase 1: Initialize PSA
+    // ==========================================
+    warn!("┌──────────────────────────────────────────────────────────────┐");
+    warn!("│  PHASE 1: Initialize PSA                                      │");
+    warn!("└──────────────────────────────────────────────────────────────┘");
+    warn!("");
+
+    warn!("  [1.1] Initializing PSA Crypto subsystem...");
+    show_key();
+    sleep(Duration::millis_at_least(300));
+
+    if let Err(e) = psa::crypto::init() {
+        warn!("  FAILURE: PSA Crypto init failed: {}", e);
+        show_x();
+        return RpcResult::Error(-1, "PSA init failed");
+    }
+
+    warn!("        PSA Crypto initialized!");
+    warn!("");
+
+    // Demo UIDs - applications should define their own strategy
+    const SAGA_TAG_UID: psa::StorageUid = 0x0002_0001;
+    const XWING_SEED_UID: psa::StorageUid = 0x0003_0001;
+
+    // ==========================================
+    // Phase 2: Check for existing stored data
+    // ==========================================
+    warn!("┌──────────────────────────────────────────────────────────────┐");
+    warn!("│  PHASE 2: Check for Existing Stored Data                      │");
+    warn!("└──────────────────────────────────────────────────────────────┘");
+    warn!("");
+
+    let saga_tag_exists = psa::its::exists(SAGA_TAG_UID);
+    let xwing_seed_exists = psa::its::exists(XWING_SEED_UID);
+
+    warn!(
+        "  SAGA credential (UID 0x{:08X}): {}",
+        SAGA_TAG_UID,
+        if saga_tag_exists {
+            "EXISTS"
+        } else {
+            "not found"
+        }
+    );
+    warn!(
+        "  X-Wing seed (UID 0x{:08X}): {}",
+        XWING_SEED_UID,
+        if xwing_seed_exists {
+            "EXISTS"
+        } else {
+            "not found"
+        }
+    );
+    warn!("");
+
+    // ==========================================
+    // Phase 3: SAGA Credential Storage
+    // ==========================================
+    warn!("┌──────────────────────────────────────────────────────────────┐");
+    warn!("│  PHASE 3: SAGA Credential Storage                             │");
+    warn!("└──────────────────────────────────────────────────────────────┘");
+    warn!("");
+
+    let num_attrs = 2;
+
+    // Setup SAGA keypair (normally done by issuer)
+    warn!("  [3.1] Setting up SAGA issuer keypair...");
+    show_key();
+    sleep(Duration::millis_at_least(400));
+
+    let saga_keypair = match saga::KeyPair::setup(&mut rng, num_attrs) {
+        Ok(kp) => kp,
+        Err(e) => {
+            warn!("  FAILURE: SAGA setup failed: {:?}", e);
+            show_x();
+            return RpcResult::Error(-2, "SAGA setup failed");
+        }
+    };
+
+    let saga_params = saga_keypair.params();
+    let saga_pk = saga_keypair.pk();
+    warn!("        Keypair created ({} attributes)", num_attrs);
+
+    // Create attributes
+    let mut messages = [saga::Point::identity(); saga::MAX_ATTRS];
+    for i in 0..num_attrs {
+        let scalar = saga::Scalar::from((i + 42) as u64);
+        messages[i] = saga::smul(&saga_params.g, &scalar);
+    }
+
+    // Issue credential
+    warn!("");
+    warn!("  [3.2] Issuing SAGA credential...");
+    show_signature();
+    sleep(Duration::millis_at_least(400));
+
+    let credential = match saga_keypair.mac(&mut rng, &messages[..num_attrs]) {
+        Ok(t) => t,
+        Err(e) => {
+            warn!("  FAILURE: Credential issuance failed: {:?}", e);
+            show_x();
+            return RpcResult::Error(-3, "Credential failed");
+        }
+    };
+
+    warn!("        Credential issued!");
+
+    // Store credential in PSA ITS
+    warn!("");
+    warn!("  [3.3] Storing credential in PSA ITS...");
+    show_lock();
+    sleep(Duration::millis_at_least(300));
+
+    // Remove if exists from previous run
+    let _ = psa::its::remove(SAGA_TAG_UID);
+
+    // Serialize and store
+    let tag_bytes = credential.to_bytes();
+    warn!("        Serialized size: {} bytes", tag_bytes.len());
+
+    if let Err(e) = psa::its::set(SAGA_TAG_UID, &tag_bytes, psa::StorageFlags::NONE) {
+        warn!("  FAILURE: ITS store failed: {}", e);
+        show_x();
+        return RpcResult::Error(-4, "ITS store failed");
+    }
+
+    warn!("        Credential stored!");
+
+    // Load it back and verify
+    warn!("");
+    warn!("  [3.4] Loading credential back...");
+    show_shield();
+    sleep(Duration::millis_at_least(300));
+
+    let mut loaded_bytes = [0u8; 512]; // TAG_SIZE is within this
+    let loaded_len = match psa::its::get(SAGA_TAG_UID, 0, &mut loaded_bytes) {
+        Ok(len) => len,
+        Err(e) => {
+            warn!("  FAILURE: ITS load failed: {}", e);
+            show_x();
+            return RpcResult::Error(-5, "ITS load failed");
+        }
+    };
+
+    warn!("        Loaded {} bytes", loaded_len);
+
+    // Deserialize
+    let loaded_tag_bytes: [u8; saga::TAG_SIZE] = match loaded_bytes[..saga::TAG_SIZE].try_into() {
+        Ok(arr) => arr,
+        Err(_) => {
+            warn!("  FAILURE: Invalid tag size!");
+            show_x();
+            return RpcResult::Error(-6, "Invalid tag size");
+        }
+    };
+
+    let loaded_tag = match saga::Tag::from_bytes(&loaded_tag_bytes) {
+        Some(t) => t,
+        None => {
+            warn!("  FAILURE: Tag deserialization failed!");
+            show_x();
+            return RpcResult::Error(-7, "Deserialize failed");
+        }
+    };
+
+    // Verify loaded credential works
+    if !loaded_tag.verify(saga_params, saga_pk, &messages[..num_attrs]) {
+        warn!("  FAILURE: Loaded credential invalid!");
+        show_x();
+        return RpcResult::Error(-8, "Credential invalid");
+    }
+
+    warn!("        Credential verified after load!");
+    warn!("");
+    warn!("  ✓ SAGA credential persisted successfully!");
+    warn!("");
+
+    // ==========================================
+    // Phase 4: X-Wing Seed Storage
+    // ==========================================
+    warn!("┌──────────────────────────────────────────────────────────────┐");
+    warn!("│  PHASE 4: X-Wing Seed Storage                                 │");
+    warn!("└──────────────────────────────────────────────────────────────┘");
+    warn!("");
+
+    // Generate X-Wing seed
+    warn!("  [4.1] Generating X-Wing seed...");
+    show_key();
+    sleep(Duration::millis_at_least(300));
+
+    let seed: [u8; xwing::SECRET_KEY_SIZE] = rng.random_array();
+    warn!("        Seed generated ({} bytes)", xwing::SECRET_KEY_SIZE);
+    warn!(
+        "        Seed prefix: {:02x}{:02x}{:02x}{:02x}...",
+        seed[0], seed[1], seed[2], seed[3]
+    );
+
+    // Store seed
+    warn!("");
+    warn!("  [4.2] Storing seed in PSA ITS...");
+    show_lock();
+    sleep(Duration::millis_at_least(300));
+
+    // Remove if exists from previous run
+    let _ = psa::its::remove(XWING_SEED_UID);
+
+    if let Err(e) = psa::its::set(XWING_SEED_UID, &seed, psa::StorageFlags::NONE) {
+        warn!("  FAILURE: Seed store failed: {}", e);
+        show_x();
+        return RpcResult::Error(-9, "Seed store failed");
+    }
+
+    warn!("        Seed stored!");
+
+    // Load seed and regenerate keypair
+    warn!("");
+    warn!("  [4.3] Loading seed and regenerating keypair...");
+    show_shield();
+    sleep(Duration::millis_at_least(300));
+
+    let loaded_seed: [u8; xwing::SECRET_KEY_SIZE] = match psa::its::load(XWING_SEED_UID) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("  FAILURE: Seed load failed: {}", e);
+            show_x();
+            return RpcResult::Error(-10, "Seed load failed");
+        }
+    };
+
+    warn!(
+        "        Loaded seed prefix: {:02x}{:02x}{:02x}{:02x}...",
+        loaded_seed[0], loaded_seed[1], loaded_seed[2], loaded_seed[3]
+    );
+
+    // Verify seeds match
+    if seed != loaded_seed {
+        warn!("  FAILURE: Seeds don't match!");
+        show_x();
+        return RpcResult::Error(-11, "Seed mismatch");
+    }
+
+    warn!("        Seeds match!");
+
+    // Regenerate keypair from loaded seed
+    let secret_key = xwing::SecretKey::from_seed(&loaded_seed);
+    let public_key = secret_key.public_key();
+
+    let pk_bytes = public_key.as_bytes();
+    warn!(
+        "        Regenerated PK prefix: {:02x}{:02x}{:02x}{:02x}...",
+        pk_bytes[0], pk_bytes[1], pk_bytes[2], pk_bytes[3]
+    );
+    warn!("");
+    warn!("  ✓ X-Wing seed persisted successfully!");
+    warn!("");
+
+    // ==========================================
+    // Phase 5: Demonstrate Usage After "Reboot"
+    // ==========================================
+    warn!("┌──────────────────────────────────────────────────────────────┐");
+    warn!("│  PHASE 5: Simulated Reboot Scenario                           │");
+    warn!("└──────────────────────────────────────────────────────────────┘");
+    warn!("");
+    warn!("  In a real scenario:");
+    warn!("  1. Device stores credential + seed");
+    warn!("  2. Device powers off");
+    warn!("  3. Device powers on");
+    warn!("  4. Device loads credential + seed from ITS");
+    warn!("  5. Device can immediately use credential for auth");
+    warn!("  6. Device can immediately do X-Wing key exchange");
+    warn!("");
+
+    // Demonstrate loaded credential can create presentation
+    warn!("  [5.1] Creating presentation from loaded credential...");
+    show_signature();
+    sleep(Duration::millis_at_least(400));
+
+    let predicate =
+        match loaded_tag.get_predicate(&mut rng, saga_params, saga_pk, &messages[..num_attrs]) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("  FAILURE: Presentation failed: {:?}", e);
+                show_x();
+                return RpcResult::Error(-12, "Presentation failed");
+            }
+        };
+
+    match saga_keypair.verify_presentation(&predicate.presentation(), predicate.commitments()) {
+        Ok(true) => {
+            warn!("        Presentation verified!");
+        }
+        _ => {
+            warn!("  FAILURE: Presentation verification failed!");
+            show_x();
+            return RpcResult::Error(-13, "Verify failed");
+        }
+    }
+
+    // Demonstrate loaded X-Wing key works
+    warn!("");
+    warn!("  [5.2] Performing X-Wing encapsulation with loaded key...");
+    show_lock();
+    sleep(Duration::millis_at_least(400));
+
+    let encaps_seed: [u8; xwing::ENCAPS_SEED_SIZE] = rng.random_array();
+    let (ciphertext, sender_ss) = xwing::encapsulate(&public_key, encaps_seed);
+
+    let receiver_ss = xwing::decapsulate(&secret_key, &ciphertext);
+
+    if sender_ss.as_bytes() != receiver_ss.as_bytes() {
+        warn!("  FAILURE: Shared secrets don't match!");
+        show_x();
+        return RpcResult::Error(-14, "SS mismatch");
+    }
+
+    warn!("        Key exchange successful!");
+    warn!(
+        "        Shared secret: {:02x}{:02x}{:02x}{:02x}...",
+        sender_ss.as_bytes()[0],
+        sender_ss.as_bytes()[1],
+        sender_ss.as_bytes()[2],
+        sender_ss.as_bytes()[3]
+    );
+    warn!("");
+
+    // Cleanup (for demo purposes)
+    warn!("  [5.3] Cleanup (demo only)...");
+    let _ = psa::its::remove(SAGA_TAG_UID);
+    let _ = psa::its::remove(XWING_SEED_UID);
+    warn!("        Entries removed");
+    warn!("");
+
+    // ==========================================
+    // Summary
+    // ==========================================
+    warn!("╔══════════════════════════════════════════════════════════════╗");
+    warn!("║              PSA Persistence Demo Complete!                   ║");
+    warn!("╠══════════════════════════════════════════════════════════════╣");
+    warn!("║  SAGA:   Credential stored → loaded → verified → presented   ║");
+    warn!("║  X-Wing: Seed stored → loaded → keypair regenerated → used   ║");
+    warn!("║                                                              ║");
+    warn!("║  Key Takeaways:                                              ║");
+    warn!("║  - Credentials survive reboots (encrypted at rest)           ║");
+    warn!("║  - Only 32-byte seed needed for X-Wing (not 1.2KB pubkey)    ║");
+    warn!("║  - Device can immediately authenticate after power-on        ║");
+    warn!("║  - Post-quantum secure channel established instantly         ║");
+    warn!("╚══════════════════════════════════════════════════════════════╝");
+    warn!("");
+
+    show_checkmark();
+    RpcResult::Bool(true)
+}
+
 // NOTE: COSE_Sign1 demo temporarily disabled due to ML-DSA performance issues.
 // The arduino-zcbor crate with COSE support is ready and working, but ML-DSA
 // operations currently timeout (>3 minutes). Once the ML-DSA performance
@@ -1869,6 +2237,7 @@ extern "C" fn rust_main() {
     server.register("saga.run_demo", handle_saga_demo);
     server.register("saga_xwing.run_demo", handle_saga_xwing_demo);
     server.register("psa.run_demo", handle_psa_demo);
+    server.register("persistence.run_demo", handle_persistence_demo);
     // NOTE: cose.run_demo disabled due to ML-DSA performance issues
 
     // LED matrix control
@@ -1888,6 +2257,7 @@ extern "C" fn rust_main() {
     warn!("  - saga.run_demo     -> SAGA anonymous credentials demo");
     warn!("  - saga_xwing.run_demo -> SAGA+X-Wing credential key exchange");
     warn!("  - psa.run_demo      -> PSA Secure Storage + Key Management");
+    warn!("  - persistence.run_demo -> SAGA + X-Wing PSA persistence demo");
     warn!("  - led_matrix.clear  -> clear LED display");
     warn!("");
     warn!("NOTE: ML-DSA operations have a known performance issue");

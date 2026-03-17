@@ -9,7 +9,23 @@ use rand_core::{CryptoRng, RngCore};
 use super::errors::SagaError;
 use super::nizk::{compute_predicate, compute_tag_proof, verify_tag_proof, Predicate};
 use super::smul;
-use super::types::{Parameters, Point, PublicKey, Scalar, ScalarExt, SecretKey, MAX_ATTRS};
+use super::types::{
+    Parameters, Point, PointExt, PublicKey, Scalar, ScalarExt, SecretKey, MAX_ATTRS,
+    NUM_ATTRS_SIZE, POINT_SIZE, SCALAR_SIZE,
+};
+
+// ============================================================================
+// Serialization Size Constants
+// ============================================================================
+
+/// Size of serialized Proof:
+/// c (32) + s_x (32) + s_y_vec (MAX_ATTRS * 32) + num_attrs (1)
+pub const PROOF_SIZE: usize =
+    SCALAR_SIZE + SCALAR_SIZE + (MAX_ATTRS * SCALAR_SIZE) + NUM_ATTRS_SIZE;
+
+/// Size of serialized Tag:
+/// g_a (32) + e (32) + proof (PROOF_SIZE)
+pub const TAG_SIZE: usize = POINT_SIZE + SCALAR_SIZE + PROOF_SIZE;
 
 /// Schnorr-style NIZK proof for BBS-SAGA MAC correctness.
 #[derive(Clone, Debug)]
@@ -29,6 +45,70 @@ impl Proof {
     #[inline]
     pub fn s_y_vec_slice(&self) -> &[Scalar] {
         &self.s_y_vec[..self.num_attrs]
+    }
+
+    /// Serialize Proof to bytes.
+    ///
+    /// Format: c (32) || s_x (32) || s_y_vec (MAX_ATTRS * 32) || num_attrs (1)
+    pub fn to_bytes(&self) -> [u8; PROOF_SIZE] {
+        let mut buf = [0u8; PROOF_SIZE];
+        let mut offset = 0;
+
+        // c
+        buf[offset..offset + SCALAR_SIZE].copy_from_slice(&self.c.to_bytes());
+        offset += SCALAR_SIZE;
+
+        // s_x
+        buf[offset..offset + SCALAR_SIZE].copy_from_slice(&self.s_x.to_bytes());
+        offset += SCALAR_SIZE;
+
+        // s_y_vec
+        for j in 0..MAX_ATTRS {
+            buf[offset..offset + SCALAR_SIZE].copy_from_slice(&self.s_y_vec[j].to_bytes());
+            offset += SCALAR_SIZE;
+        }
+
+        // num_attrs
+        buf[offset] = self.num_attrs as u8;
+
+        buf
+    }
+
+    /// Deserialize Proof from bytes.
+    pub fn from_bytes(bytes: &[u8; PROOF_SIZE]) -> Option<Self> {
+        let mut offset = 0;
+        let mut scalar_bytes = [0u8; SCALAR_SIZE];
+
+        // c
+        scalar_bytes.copy_from_slice(&bytes[offset..offset + SCALAR_SIZE]);
+        let c = Scalar::from_bytes(&scalar_bytes)?;
+        offset += SCALAR_SIZE;
+
+        // s_x
+        scalar_bytes.copy_from_slice(&bytes[offset..offset + SCALAR_SIZE]);
+        let s_x = Scalar::from_bytes(&scalar_bytes)?;
+        offset += SCALAR_SIZE;
+
+        // s_y_vec
+        let mut s_y_vec = [Scalar::ZERO; MAX_ATTRS];
+        for j in 0..MAX_ATTRS {
+            scalar_bytes.copy_from_slice(&bytes[offset..offset + SCALAR_SIZE]);
+            s_y_vec[j] = Scalar::from_bytes(&scalar_bytes)?;
+            offset += SCALAR_SIZE;
+        }
+
+        // num_attrs
+        let num_attrs = bytes[offset] as usize;
+        if num_attrs > MAX_ATTRS {
+            return None;
+        }
+
+        Some(Self {
+            c,
+            s_x,
+            s_y_vec,
+            num_attrs,
+        })
     }
 }
 
@@ -66,6 +146,50 @@ impl Tag {
         messages: &[Point],
     ) -> Result<Predicate, SagaError> {
         compute_predicate(rng, params, pk, self, messages)
+    }
+
+    /// Serialize Tag to bytes.
+    ///
+    /// Format: g_a (32) || e (32) || proof (PROOF_SIZE)
+    pub fn to_bytes(&self) -> [u8; TAG_SIZE] {
+        let mut buf = [0u8; TAG_SIZE];
+        let mut offset = 0;
+
+        // g_a
+        buf[offset..offset + POINT_SIZE].copy_from_slice(&self.g_a.to_bytes());
+        offset += POINT_SIZE;
+
+        // e
+        buf[offset..offset + SCALAR_SIZE].copy_from_slice(&self.e.to_bytes());
+        offset += SCALAR_SIZE;
+
+        // proof
+        buf[offset..offset + PROOF_SIZE].copy_from_slice(&self.proof.to_bytes());
+
+        buf
+    }
+
+    /// Deserialize Tag from bytes.
+    pub fn from_bytes(bytes: &[u8; TAG_SIZE]) -> Option<Self> {
+        let mut offset = 0;
+
+        // g_a
+        let mut point_bytes = [0u8; POINT_SIZE];
+        point_bytes.copy_from_slice(&bytes[offset..offset + POINT_SIZE]);
+        let g_a = Point::from_bytes(&point_bytes)?;
+        offset += POINT_SIZE;
+
+        // e
+        let mut scalar_bytes = [0u8; SCALAR_SIZE];
+        scalar_bytes.copy_from_slice(&bytes[offset..offset + SCALAR_SIZE]);
+        let e = Scalar::from_bytes(&scalar_bytes)?;
+        offset += SCALAR_SIZE;
+
+        // proof
+        let proof_bytes: &[u8; PROOF_SIZE] = bytes[offset..offset + PROOF_SIZE].try_into().ok()?;
+        let proof = Proof::from_bytes(proof_bytes)?;
+
+        Some(Self { g_a, e, proof })
     }
 }
 

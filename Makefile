@@ -427,6 +427,7 @@ demo: check-ssh
 demo-list:
 	@echo "$(CYAN)Available demos:$(NC)"
 	@echo "  make demo DEMO=psa         - PSA Secure Storage + Key Management"
+	@echo "  make demo DEMO=persistence - PSA Persistence (SAGA + X-Wing storage)"
 	@echo "  make demo DEMO=mlkem       - ML-KEM 768 (Post-Quantum KEM)"
 	@echo "  make demo DEMO=xwing       - X-Wing Hybrid PQ KEM"
 	@echo "  make demo DEMO=saga        - SAGA Anonymous Credentials"

@@ -7,8 +7,13 @@ use rand_core::{CryptoRng, RngCore};
 
 use super::errors::SagaError;
 use super::mac::{Proof, Tag};
-use super::types::{Parameters, Point, PublicKey, Scalar, ScalarExt, SecretKey, MAX_ATTRS};
+use super::types::{
+    Parameters, Point, PointExt, PublicKey, Scalar, ScalarExt, SecretKey, MAX_ATTRS, POINT_SIZE,
+};
 use super::{hash_to_scalar, smul, PROT_NAME_MAC};
+
+/// Size of serialized Presentation: c_a (32) + t (32)
+pub const PRESENTATION_SIZE: usize = POINT_SIZE + POINT_SIZE;
 
 /// Compute the challenge for tag proof verification.
 ///
@@ -209,6 +214,38 @@ pub struct Presentation {
     pub c_a: Point,
     /// Proof term T
     pub t: Point,
+}
+
+impl Presentation {
+    /// Serialize Presentation to bytes.
+    ///
+    /// Format: c_a (32) || t (32)
+    pub fn to_bytes(&self) -> [u8; PRESENTATION_SIZE] {
+        let mut buf = [0u8; PRESENTATION_SIZE];
+
+        // c_a
+        buf[0..POINT_SIZE].copy_from_slice(&self.c_a.to_bytes());
+
+        // t
+        buf[POINT_SIZE..POINT_SIZE + POINT_SIZE].copy_from_slice(&self.t.to_bytes());
+
+        buf
+    }
+
+    /// Deserialize Presentation from bytes.
+    pub fn from_bytes(bytes: &[u8; PRESENTATION_SIZE]) -> Option<Self> {
+        let mut point_bytes = [0u8; POINT_SIZE];
+
+        // c_a
+        point_bytes.copy_from_slice(&bytes[0..POINT_SIZE]);
+        let c_a = Point::from_bytes(&point_bytes)?;
+
+        // t
+        point_bytes.copy_from_slice(&bytes[POINT_SIZE..POINT_SIZE + POINT_SIZE]);
+        let t = Point::from_bytes(&point_bytes)?;
+
+        Some(Self { c_a, t })
+    }
 }
 
 /// A predicate containing the presentation and private data.

@@ -90,6 +90,10 @@ struct Args {
     #[arg(long)]
     psa_demo: bool,
 
+    /// Run the MCU-side PSA Persistence demo (SAGA + X-Wing storage)
+    #[arg(long)]
+    persistence_demo: bool,
+
     /// Just ping the MCU
     #[arg(short, long)]
     ping: bool,
@@ -585,6 +589,38 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if args.persistence_demo {
+        info!("");
+        info!("Running PSA Persistence demo on MCU...");
+        info!("Demonstrates storing SAGA credentials and X-Wing seeds persistently");
+        info!("Data survives reboots!");
+        info!("Watch the LED matrix for status indicators!");
+        info!("");
+        match client.call_timeout("persistence.run_demo", vec![], demo_timeout) {
+            Ok(result) => {
+                info!("PSA Persistence demo completed: {:?}", result);
+                info!("");
+                info!("The MCU successfully:");
+                info!("  - Created and stored a SAGA credential (encrypted at rest)");
+                info!("  - Loaded credential and verified it works");
+                info!("  - Created presentation from loaded credential");
+                info!("  - Generated and stored X-Wing seed (32 bytes)");
+                info!("  - Loaded seed and regenerated full keypair");
+                info!("  - Performed key exchange with regenerated keys");
+                info!("");
+                info!("Key Takeaways:");
+                info!("  - Credentials survive reboots (encrypted in flash)");
+                info!("  - Only 32-byte seed needed to restore X-Wing keys");
+                info!("  - Device ready for auth + PQ key exchange after power-on");
+            }
+            Err(e) => {
+                error!("PSA Persistence demo failed: {}", e);
+                return Err(e.into());
+            }
+        }
+        return Ok(());
+    }
+
     if args.demo {
         return run_demo(&client, &args.message);
     }
@@ -594,6 +630,7 @@ fn main() -> Result<()> {
     info!("Usage:");
     info!("  pqc-client --ping               Test connection");
     info!("  pqc-client --psa-demo           Run PSA Secure Storage demo on MCU");
+    info!("  pqc-client --persistence-demo   Run PSA Persistence demo (SAGA + X-Wing storage)");
     info!("  pqc-client --mlkem-demo         Run ML-KEM 768 demo on MCU");
     info!("  pqc-client --xwing-demo         Run X-Wing hybrid PQ KEM demo on MCU");
     info!("  pqc-client --saga-demo          Run SAGA anonymous credentials demo on MCU");

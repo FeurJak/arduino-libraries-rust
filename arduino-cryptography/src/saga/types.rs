@@ -2,6 +2,7 @@
 //!
 //! Uses fixed-size arrays to avoid heap allocations for no_std compatibility.
 
+use core::mem::size_of;
 use rand_core::{CryptoRng, RngCore};
 
 // Re-export curve25519-dalek types
@@ -19,6 +20,36 @@ use super::smul;
 /// This is a compile-time constant to avoid heap allocations.
 /// Adjust based on your use case (more attributes = more memory).
 pub const MAX_ATTRS: usize = 8;
+
+// ============================================================================
+// Serialization Size Constants
+// ============================================================================
+
+/// Size of a serialized Point (compressed Edwards point)
+pub const POINT_SIZE: usize = 32;
+
+/// Size of a serialized Scalar
+pub const SCALAR_SIZE: usize = 32;
+
+/// Size of num_attrs field (stored as u8)
+pub const NUM_ATTRS_SIZE: usize = 1;
+
+/// Size of serialized Parameters:
+/// g (32) + pp_saga (32) + g_vec (MAX_ATTRS * 32) + td_vec (MAX_ATTRS * 32) + num_attrs (1)
+pub const PARAMETERS_SIZE: usize =
+    POINT_SIZE + POINT_SIZE + (MAX_ATTRS * POINT_SIZE) + (MAX_ATTRS * SCALAR_SIZE) + NUM_ATTRS_SIZE;
+
+/// Size of serialized SecretKey:
+/// x (32) + y_vec (MAX_ATTRS * 32) + num_attrs (1)
+pub const SECRET_KEY_SIZE: usize = SCALAR_SIZE + (MAX_ATTRS * SCALAR_SIZE) + NUM_ATTRS_SIZE;
+
+/// Size of serialized PublicKey:
+/// g_x (32) + g_y_vec (MAX_ATTRS * 32) + num_attrs (1)
+pub const PUBLIC_KEY_SIZE: usize = POINT_SIZE + (MAX_ATTRS * POINT_SIZE) + NUM_ATTRS_SIZE;
+
+/// Size of serialized KeyPair:
+/// Parameters + PublicKey + SecretKey
+pub const KEY_PAIR_SIZE: usize = PARAMETERS_SIZE + PUBLIC_KEY_SIZE + SECRET_KEY_SIZE;
 
 /// Extension trait for Point operations
 pub trait PointExt {
@@ -157,6 +188,88 @@ impl Parameters {
     pub fn g_vec_slice(&self) -> &[Point] {
         &self.g_vec[..self.num_attrs]
     }
+
+    /// Serialize Parameters to bytes.
+    ///
+    /// Format: g (32) || pp_saga (32) || g_vec (MAX_ATTRS * 32) || td_vec (MAX_ATTRS * 32) || num_attrs (1)
+    pub fn to_bytes(&self) -> [u8; PARAMETERS_SIZE] {
+        let mut buf = [0u8; PARAMETERS_SIZE];
+        let mut offset = 0;
+
+        // g
+        buf[offset..offset + POINT_SIZE].copy_from_slice(&self.g.to_bytes());
+        offset += POINT_SIZE;
+
+        // pp_saga
+        buf[offset..offset + POINT_SIZE].copy_from_slice(&self.pp_saga.to_bytes());
+        offset += POINT_SIZE;
+
+        // g_vec
+        for j in 0..MAX_ATTRS {
+            buf[offset..offset + POINT_SIZE].copy_from_slice(&self.g_vec[j].to_bytes());
+            offset += POINT_SIZE;
+        }
+
+        // td_vec
+        for j in 0..MAX_ATTRS {
+            buf[offset..offset + SCALAR_SIZE].copy_from_slice(&self.td_vec[j].to_bytes());
+            offset += SCALAR_SIZE;
+        }
+
+        // num_attrs
+        buf[offset] = self.num_attrs as u8;
+
+        buf
+    }
+
+    /// Deserialize Parameters from bytes.
+    ///
+    /// Returns None if deserialization fails (invalid point encoding).
+    pub fn from_bytes(bytes: &[u8; PARAMETERS_SIZE]) -> Option<Self> {
+        let mut offset = 0;
+
+        // g
+        let mut point_bytes = [0u8; POINT_SIZE];
+        point_bytes.copy_from_slice(&bytes[offset..offset + POINT_SIZE]);
+        let g = Point::from_bytes(&point_bytes)?;
+        offset += POINT_SIZE;
+
+        // pp_saga
+        point_bytes.copy_from_slice(&bytes[offset..offset + POINT_SIZE]);
+        let pp_saga = Point::from_bytes(&point_bytes)?;
+        offset += POINT_SIZE;
+
+        // g_vec
+        let mut g_vec = [Point::identity(); MAX_ATTRS];
+        for j in 0..MAX_ATTRS {
+            point_bytes.copy_from_slice(&bytes[offset..offset + POINT_SIZE]);
+            g_vec[j] = Point::from_bytes(&point_bytes)?;
+            offset += POINT_SIZE;
+        }
+
+        // td_vec
+        let mut td_vec = [Scalar::ZERO; MAX_ATTRS];
+        let mut scalar_bytes = [0u8; SCALAR_SIZE];
+        for j in 0..MAX_ATTRS {
+            scalar_bytes.copy_from_slice(&bytes[offset..offset + SCALAR_SIZE]);
+            td_vec[j] = Scalar::from_bytes(&scalar_bytes)?;
+            offset += SCALAR_SIZE;
+        }
+
+        // num_attrs
+        let num_attrs = bytes[offset] as usize;
+        if num_attrs > MAX_ATTRS {
+            return None;
+        }
+
+        Some(Self {
+            g,
+            pp_saga,
+            g_vec,
+            td_vec,
+            num_attrs,
+        })
+    }
 }
 
 /// Secret key for the issuer.
@@ -180,6 +293,62 @@ impl core::fmt::Debug for SecretKey {
     }
 }
 
+impl SecretKey {
+    /// Serialize SecretKey to bytes.
+    ///
+    /// Format: x (32) || y_vec (MAX_ATTRS * 32) || num_attrs (1)
+    pub fn to_bytes(&self) -> [u8; SECRET_KEY_SIZE] {
+        let mut buf = [0u8; SECRET_KEY_SIZE];
+        let mut offset = 0;
+
+        // x
+        buf[offset..offset + SCALAR_SIZE].copy_from_slice(&self.x.to_bytes());
+        offset += SCALAR_SIZE;
+
+        // y_vec
+        for j in 0..MAX_ATTRS {
+            buf[offset..offset + SCALAR_SIZE].copy_from_slice(&self.y_vec[j].to_bytes());
+            offset += SCALAR_SIZE;
+        }
+
+        // num_attrs
+        buf[offset] = self.num_attrs as u8;
+
+        buf
+    }
+
+    /// Deserialize SecretKey from bytes.
+    pub fn from_bytes(bytes: &[u8; SECRET_KEY_SIZE]) -> Option<Self> {
+        let mut offset = 0;
+        let mut scalar_bytes = [0u8; SCALAR_SIZE];
+
+        // x
+        scalar_bytes.copy_from_slice(&bytes[offset..offset + SCALAR_SIZE]);
+        let x = Scalar::from_bytes(&scalar_bytes)?;
+        offset += SCALAR_SIZE;
+
+        // y_vec
+        let mut y_vec = [Scalar::ZERO; MAX_ATTRS];
+        for j in 0..MAX_ATTRS {
+            scalar_bytes.copy_from_slice(&bytes[offset..offset + SCALAR_SIZE]);
+            y_vec[j] = Scalar::from_bytes(&scalar_bytes)?;
+            offset += SCALAR_SIZE;
+        }
+
+        // num_attrs
+        let num_attrs = bytes[offset] as usize;
+        if num_attrs > MAX_ATTRS {
+            return None;
+        }
+
+        Some(Self {
+            x,
+            y_vec,
+            num_attrs,
+        })
+    }
+}
+
 /// Public key for verification.
 #[derive(Clone, Debug)]
 pub struct PublicKey {
@@ -196,6 +365,60 @@ impl PublicKey {
     #[inline]
     pub fn g_y_vec_slice(&self) -> &[Point] {
         &self.g_y_vec[..self.num_attrs]
+    }
+
+    /// Serialize PublicKey to bytes.
+    ///
+    /// Format: g_x (32) || g_y_vec (MAX_ATTRS * 32) || num_attrs (1)
+    pub fn to_bytes(&self) -> [u8; PUBLIC_KEY_SIZE] {
+        let mut buf = [0u8; PUBLIC_KEY_SIZE];
+        let mut offset = 0;
+
+        // g_x
+        buf[offset..offset + POINT_SIZE].copy_from_slice(&self.g_x.to_bytes());
+        offset += POINT_SIZE;
+
+        // g_y_vec
+        for j in 0..MAX_ATTRS {
+            buf[offset..offset + POINT_SIZE].copy_from_slice(&self.g_y_vec[j].to_bytes());
+            offset += POINT_SIZE;
+        }
+
+        // num_attrs
+        buf[offset] = self.num_attrs as u8;
+
+        buf
+    }
+
+    /// Deserialize PublicKey from bytes.
+    pub fn from_bytes(bytes: &[u8; PUBLIC_KEY_SIZE]) -> Option<Self> {
+        let mut offset = 0;
+        let mut point_bytes = [0u8; POINT_SIZE];
+
+        // g_x
+        point_bytes.copy_from_slice(&bytes[offset..offset + POINT_SIZE]);
+        let g_x = Point::from_bytes(&point_bytes)?;
+        offset += POINT_SIZE;
+
+        // g_y_vec
+        let mut g_y_vec = [Point::identity(); MAX_ATTRS];
+        for j in 0..MAX_ATTRS {
+            point_bytes.copy_from_slice(&bytes[offset..offset + POINT_SIZE]);
+            g_y_vec[j] = Point::from_bytes(&point_bytes)?;
+            offset += POINT_SIZE;
+        }
+
+        // num_attrs
+        let num_attrs = bytes[offset] as usize;
+        if num_attrs > MAX_ATTRS {
+            return None;
+        }
+
+        Some(Self {
+            g_x,
+            g_y_vec,
+            num_attrs,
+        })
     }
 }
 
@@ -274,6 +497,51 @@ impl KeyPair {
         c_j_vec: &[Point],
     ) -> Result<bool, SagaError> {
         verify_presentation(&self.params, &self.sk, presentation, c_j_vec)
+    }
+
+    /// Serialize KeyPair to bytes.
+    ///
+    /// Format: Parameters || PublicKey || SecretKey
+    pub fn to_bytes(&self) -> [u8; KEY_PAIR_SIZE] {
+        let mut buf = [0u8; KEY_PAIR_SIZE];
+        let mut offset = 0;
+
+        // Parameters
+        buf[offset..offset + PARAMETERS_SIZE].copy_from_slice(&self.params.to_bytes());
+        offset += PARAMETERS_SIZE;
+
+        // PublicKey
+        buf[offset..offset + PUBLIC_KEY_SIZE].copy_from_slice(&self.pk.to_bytes());
+        offset += PUBLIC_KEY_SIZE;
+
+        // SecretKey
+        buf[offset..offset + SECRET_KEY_SIZE].copy_from_slice(&self.sk.to_bytes());
+
+        buf
+    }
+
+    /// Deserialize KeyPair from bytes.
+    pub fn from_bytes(bytes: &[u8; KEY_PAIR_SIZE]) -> Option<Self> {
+        let mut offset = 0;
+
+        // Parameters
+        let params_bytes: &[u8; PARAMETERS_SIZE] =
+            bytes[offset..offset + PARAMETERS_SIZE].try_into().ok()?;
+        let params = Parameters::from_bytes(params_bytes)?;
+        offset += PARAMETERS_SIZE;
+
+        // PublicKey
+        let pk_bytes: &[u8; PUBLIC_KEY_SIZE] =
+            bytes[offset..offset + PUBLIC_KEY_SIZE].try_into().ok()?;
+        let pk = PublicKey::from_bytes(pk_bytes)?;
+        offset += PUBLIC_KEY_SIZE;
+
+        // SecretKey
+        let sk_bytes: &[u8; SECRET_KEY_SIZE] =
+            bytes[offset..offset + SECRET_KEY_SIZE].try_into().ok()?;
+        let sk = SecretKey::from_bytes(sk_bytes)?;
+
+        Some(Self { params, pk, sk })
     }
 }
 

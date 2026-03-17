@@ -57,8 +57,9 @@ use super::errors::{PsaError, PsaResult};
 use super::types::{StorageFlags, StorageInfo, StorageUid};
 
 /// Maximum data size for ITS entries (configurable via CONFIG_SECURE_STORAGE_ITS_MAX_DATA_SIZE)
-/// Default is 128 bytes, but we set it higher to accommodate crypto keys.
-pub const MAX_DATA_SIZE: usize = 512;
+/// X-Wing public key (1216 bytes) is the largest item we need to store.
+/// Set to 1280 to provide headroom. Must match CONFIG_SECURE_STORAGE_ITS_MAX_DATA_SIZE.
+pub const MAX_DATA_SIZE: usize = 1280;
 
 /// FFI bindings to the C PSA ITS wrapper
 mod ffi {

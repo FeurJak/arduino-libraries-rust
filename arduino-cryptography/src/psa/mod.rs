@@ -78,6 +78,15 @@
 pub mod crypto;
 pub mod its;
 
+// Storage integration modules (feature-gated)
+#[cfg(feature = "saga")]
+pub mod saga;
+#[cfg(feature = "xwing")]
+pub mod xwing;
+
+// Storable trait module
+mod storable;
+
 // Private submodules
 mod errors;
 mod types;
@@ -96,3 +105,6 @@ pub use types::key_id;
 
 // Also export ITS constants
 pub use its::MAX_DATA_SIZE;
+
+// Re-export the PsaStorable trait for custom types
+pub use storable::PsaStorable;
