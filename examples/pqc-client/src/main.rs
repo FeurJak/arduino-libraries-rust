@@ -78,6 +78,14 @@ struct Args {
     #[arg(long)]
     xchacha20_demo: bool,
 
+    /// Run the MCU-side SAGA anonymous credentials demo
+    #[arg(long)]
+    saga_demo: bool,
+
+    /// Run the MCU-side SAGA+X-Wing credential-protected key exchange demo
+    #[arg(long)]
+    saga_xwing_demo: bool,
+
     /// Just ping the MCU
     #[arg(short, long)]
     ping: bool,
@@ -472,6 +480,76 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if args.saga_demo {
+        info!("");
+        info!("Running SAGA anonymous credentials demo on MCU...");
+        info!("SAGA is a BBS-style MAC scheme for privacy-preserving credentials");
+        info!("Watch the LED matrix for status indicators!");
+        info!("");
+        match client.call_timeout("saga.run_demo", vec![], demo_timeout) {
+            Ok(result) => {
+                info!("SAGA demo completed: {:?}", result);
+                info!("");
+                info!("The MCU successfully:");
+                info!("  - Generated SAGA parameters and key pair (issuer)");
+                info!("  - Created credential attributes (3 attributes)");
+                info!("  - Issued a credential (computed MAC)");
+                info!("  - Holder verified credential with public key");
+                info!("  - Created unlinkable presentation");
+                info!("  - Issuer verified presentation");
+                info!("  - Demonstrated unlinkability (two different presentations)");
+                info!("");
+                info!("SAGA provides:");
+                info!("  - Anonymous credentials (BBS-style MAC)");
+                info!("  - Unlinkable presentations (same credential, different proofs)");
+                info!("  - Zero-knowledge proofs of credential possession");
+                info!("  - Selective disclosure of attributes");
+            }
+            Err(e) => {
+                error!("SAGA demo failed: {}", e);
+                return Err(e.into());
+            }
+        }
+        return Ok(());
+    }
+
+    if args.saga_xwing_demo {
+        info!("");
+        info!("Running SAGA + X-Wing hybrid demo on MCU...");
+        info!("Credential-protected post-quantum key exchange:");
+        info!("  - SAGA: Anonymous credentials with unlinkable presentations");
+        info!("  - X-Wing: Hybrid PQ key encapsulation (ML-KEM-768 + X25519)");
+        info!("Watch the LED matrix for status indicators!");
+        info!("");
+        match client.call_timeout("saga_xwing.run_demo", vec![], demo_timeout) {
+            Ok(result) => {
+                info!("SAGA + X-Wing demo completed: {:?}", result);
+                info!("");
+                info!("The MCU successfully:");
+                info!("  - Created SAGA issuer parameters and key pair");
+                info!("  - Issued a credential to the device");
+                info!("  - Device initiated key exchange (X-Wing keypair + SAGA presentation)");
+                info!("  - Server verified presentation and encapsulated shared secret");
+                info!("  - Device completed key exchange and decrypted payload");
+                info!("  - Both parties derived matching session keys");
+                info!("");
+                info!("SAGA + X-Wing provides:");
+                info!("  - Post-quantum forward secrecy (ML-KEM-768)");
+                info!("  - Classical forward secrecy (X25519)");
+                info!("  - Anonymous authentication (SAGA unlinkable presentations)");
+                info!("  - Authenticated encryption (XChaCha20-Poly1305)");
+                info!("");
+                info!("Use case: Device proves it has a valid credential while");
+                info!("establishing a quantum-resistant encrypted channel.");
+            }
+            Err(e) => {
+                error!("SAGA + X-Wing demo failed: {}", e);
+                return Err(e.into());
+            }
+        }
+        return Ok(());
+    }
+
     if args.demo {
         return run_demo(&client, &args.message);
     }
@@ -487,6 +565,8 @@ fn main() -> Result<()> {
     info!("  pqc-client --x25519-demo        Run X25519 ECDH demo on MCU (fast!)");
     info!("  pqc-client --xwing-demo         Run X-Wing hybrid PQ KEM demo on MCU");
     info!("  pqc-client --xchacha20-demo     Run XChaCha20-Poly1305 AEAD demo on MCU");
+    info!("  pqc-client --saga-demo          Run SAGA anonymous credentials demo on MCU");
+    info!("  pqc-client --saga-xwing-demo    Run SAGA+X-Wing credential key exchange demo");
     info!("  pqc-client --cose-demo          Run COSE_Sign1 demo on MCU");
     info!("  pqc-client --demo               Run local simulation demo");
     info!("  pqc-client --demo -m \"msg\"      Demo with custom message");

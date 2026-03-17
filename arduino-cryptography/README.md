@@ -5,19 +5,28 @@ Comprehensive cryptographic primitives for the Arduino Uno Q (STM32U585 MCU), pr
 ## Features
 
 ### Post-Quantum Cryptography
+
 - **ML-KEM 768** (FIPS 203) - Post-quantum key encapsulation mechanism
 - **ML-DSA 65** (FIPS 204) - Post-quantum digital signatures
 - **X-Wing** (draft-connolly-cfrg-xwing-kem) - Hybrid PQ/classical KEM combining ML-KEM-768 + X25519
 
+### Anonymous Credentials
+
+- **SAGA** - BBS-style MAC scheme for anonymous credentials with unlinkable presentations
+- **SAGA + X-Wing** - Credential-protected post-quantum key exchange combining anonymous authentication with hybrid PQ key encapsulation
+
 ### Classical Cryptography
+
 - **X25519** - Elliptic curve Diffie-Hellman key exchange (Curve25519)
 - **Ed25519** - Elliptic curve digital signatures (Edwards curve)
 - **XChaCha20-Poly1305** - Authenticated encryption with 24-byte nonces (via mbedTLS)
 
 ### Standards Support
+
 - **COSE_Sign1** (RFC 9052) - CBOR Object Signing and Encryption with ML-DSA
 
 ### Infrastructure
+
 - **Hardware RNG** - True Random Number Generator integration via Zephyr
 
 ## Quick Start
@@ -158,6 +167,96 @@ let decrypted = decrypt(&key, &nonce, &ciphertext, &tag, aad).unwrap();
 assert_eq!(plaintext.as_slice(), decrypted.as_slice());
 ```
 
+### SAGA Anonymous Credentials Example
+
+```rust
+use arduino_cryptography::{saga, rng::HwRng};
+use saga::Identity; // For Point::identity()
+
+let mut rng = HwRng::new();
+
+// Issuer: Setup parameters and key pair
+let keypair = saga::KeyPair::setup(&mut rng, 3)?; // 3 attributes
+let params = keypair.params();
+let pk = keypair.pk();
+
+// Create credential attributes (as curve points)
+let mut messages = [saga::Point::identity(); saga::MAX_ATTRS];
+for i in 0..3 {
+    let scalar = saga::Scalar::from((i + 1) as u64);
+    messages[i] = saga::smul(&params.g, &scalar);
+}
+
+// Issuer: Issue credential (MAC)
+let credential = keypair.mac(&mut rng, &messages[..3])?;
+
+// Holder: Verify credential with public key
+assert!(credential.verify(params, pk, &messages[..3]));
+
+// Holder: Create unlinkable presentation
+let predicate = credential.get_predicate(&mut rng, params, pk, &messages[..3])?;
+let presentation = predicate.presentation();
+let commitments = predicate.commitments();
+
+// Verifier: Verify presentation (with secret key)
+let valid = keypair.verify_presentation(&presentation, commitments)?;
+assert!(valid);
+
+// Multiple presentations from the same credential are UNLINKABLE
+let predicate2 = credential.get_predicate(&mut rng, params, pk, &messages[..3])?;
+// predicate2.presentation() will look completely different from presentation
+```
+
+### SAGA + X-Wing Hybrid Key Exchange Example
+
+```rust
+use arduino_cryptography::{saga, saga_xwing, rng::HwRng};
+use saga::Identity;
+
+let mut rng = HwRng::new();
+
+// === Setup Phase ===
+// Issuer creates SAGA parameters and issues credential to device
+let saga_keypair = saga::KeyPair::setup(&mut rng, 2)?;
+let saga_params = saga_keypair.params();
+let saga_pk = saga_keypair.pk();
+
+// Create device credential
+let mut messages = [saga::Point::identity(); saga::MAX_ATTRS];
+messages[0] = saga::smul(&saga_params.g, &saga::Scalar::from(100u64));
+messages[1] = saga::smul(&saga_params.g, &saga::Scalar::from(200u64));
+let credential = saga_keypair.mac(&mut rng, &messages[..2])?;
+
+// === Key Exchange Phase ===
+
+// Device: Initiate (creates X-Wing keypair + SAGA presentation)
+let (request, device_state) = saga_xwing::CredentialKeyExchange::initiate(
+    &mut rng,
+    saga_params,
+    saga_pk,
+    &credential,
+    &messages[..2],
+)?;
+
+// Server: Verify presentation + encapsulate shared secret
+let payload = b"Access granted!";
+let (response, server_keys) = saga_xwing::CredentialKeyExchange::respond(
+    &mut rng,
+    &saga_keypair,
+    &request,
+    Some(payload),
+)?;
+
+// Device: Complete (decapsulate + decrypt payload)
+let (device_keys, decrypted) = saga_xwing::CredentialKeyExchange::complete(
+    &device_state,
+    &response,
+)?;
+
+// Both parties now have matching session keys!
+assert_eq!(server_keys.shared_secret.as_bytes(), device_keys.shared_secret.as_bytes());
+```
+
 ## Hardware RNG Setup
 
 The `HwRng` module requires some setup in your Zephyr project:
@@ -192,70 +291,91 @@ target_sources(app PRIVATE arduino-cryptography/c/hwrng.c)
 
 ### Post-Quantum Algorithms
 
-| Algorithm | Component | Size (bytes) |
-|-----------|-----------|--------------|
-| ML-KEM 768 | Public Key | 1,184 |
-| ML-KEM 768 | Private Key | 2,400 |
-| ML-KEM 768 | Ciphertext | 1,088 |
-| ML-KEM 768 | Shared Secret | 32 |
-| ML-DSA 65 | Verification Key | 1,952 |
-| ML-DSA 65 | Signing Key | 4,032 |
-| ML-DSA 65 | Signature | 3,309 |
+| Algorithm  | Component        | Size (bytes) |
+| ---------- | ---------------- | ------------ |
+| ML-KEM 768 | Public Key       | 1,184        |
+| ML-KEM 768 | Private Key      | 2,400        |
+| ML-KEM 768 | Ciphertext       | 1,088        |
+| ML-KEM 768 | Shared Secret    | 32           |
+| ML-DSA 65  | Verification Key | 1,952        |
+| ML-DSA 65  | Signing Key      | 4,032        |
+| ML-DSA 65  | Signature        | 3,309        |
 
 ### Hybrid Algorithms
 
-| Algorithm | Component | Size (bytes) |
-|-----------|-----------|--------------|
-| X-Wing | Seed | 32 |
-| X-Wing | Public Key | 1,216 (1184 ML-KEM + 32 X25519) |
-| X-Wing | Secret Key | 32 |
-| X-Wing | Ciphertext | 1,120 (1088 ML-KEM + 32 X25519) |
-| X-Wing | Shared Secret | 32 |
+| Algorithm | Component     | Size (bytes)                    |
+| --------- | ------------- | ------------------------------- |
+| X-Wing    | Seed          | 32                              |
+| X-Wing    | Public Key    | 1,216 (1184 ML-KEM + 32 X25519) |
+| X-Wing    | Secret Key    | 32                              |
+| X-Wing    | Ciphertext    | 1,120 (1088 ML-KEM + 32 X25519) |
+| X-Wing    | Shared Secret | 32                              |
+
+### Anonymous Credentials (SAGA)
+
+| Algorithm | Component          | Size (bytes)           |
+| --------- | ------------------ | ---------------------- |
+| SAGA      | Scalar             | 32                     |
+| SAGA      | Point (compressed) | 32                     |
+| SAGA      | Parameters         | ~320 (g + generators)  |
+| SAGA      | Public Key         | ~288 (X0 + generators) |
+| SAGA      | Tag (credential)   | ~160 (A, e, proof)     |
+| SAGA      | Presentation       | ~96 (C_A, T, response) |
 
 ### Classical Algorithms
 
-| Algorithm | Component | Size (bytes) |
-|-----------|-----------|--------------|
-| X25519 | Secret Key | 32 |
-| X25519 | Public Key | 32 |
-| X25519 | Shared Secret | 32 |
-| Ed25519 | Secret Key | 32 |
-| Ed25519 | Public Key | 32 |
-| Ed25519 | Signature | 64 |
-| XChaCha20-Poly1305 | Key | 32 |
-| XChaCha20-Poly1305 | Nonce | 24 |
-| XChaCha20-Poly1305 | Tag | 16 |
+| Algorithm          | Component     | Size (bytes) |
+| ------------------ | ------------- | ------------ |
+| X25519             | Secret Key    | 32           |
+| X25519             | Public Key    | 32           |
+| X25519             | Shared Secret | 32           |
+| Ed25519            | Secret Key    | 32           |
+| Ed25519            | Public Key    | 32           |
+| Ed25519            | Signature     | 64           |
+| XChaCha20-Poly1305 | Key           | 32           |
+| XChaCha20-Poly1305 | Nonce         | 24           |
+| XChaCha20-Poly1305 | Tag           | 16           |
 
 ## Performance on STM32U585
 
 ### Post-Quantum Operations
 
-| Operation | Time (approx) |
-|-----------|---------------|
-| ML-KEM Key Generation | ~200ms |
-| ML-KEM Encapsulation | ~100ms |
-| ML-KEM Decapsulation | ~100ms |
-| ML-DSA Key Generation | ~30s |
-| ML-DSA Signing | ~30s |
-| ML-DSA Verification | ~30s |
+| Operation             | Time (approx) |
+| --------------------- | ------------- |
+| ML-KEM Key Generation | ~200ms        |
+| ML-KEM Encapsulation  | ~100ms        |
+| ML-KEM Decapsulation  | ~100ms        |
+| ML-DSA Key Generation | ~30s          |
+| ML-DSA Signing        | ~30s          |
+| ML-DSA Verification   | ~30s          |
 
 ### Hybrid Operations
 
-| Operation | Time (approx) |
-|-----------|---------------|
-| X-Wing Key Generation | ~200ms |
-| X-Wing Encapsulation | ~100ms |
-| X-Wing Decapsulation | ~100ms |
+| Operation             | Time (approx) |
+| --------------------- | ------------- |
+| X-Wing Key Generation | ~200ms        |
+| X-Wing Encapsulation  | ~100ms        |
+| X-Wing Decapsulation  | ~100ms        |
+
+### Anonymous Credential Operations
+
+| Operation                   | Time (approx) |
+| --------------------------- | ------------- |
+| SAGA Setup (3 attrs)        | ~500ms        |
+| SAGA MAC (issue credential) | ~200ms        |
+| SAGA Create Presentation    | ~300ms        |
+| SAGA Verify Presentation    | ~200ms        |
+| SAGA + X-Wing Full Protocol | ~4s           |
 
 ### Classical Operations
 
-| Operation | Time (approx) |
-|-----------|---------------|
-| X25519 Key Generation | <1ms |
-| X25519 Diffie-Hellman | <1ms |
-| Ed25519 Key Generation | <1ms |
-| Ed25519 Signing | <1ms |
-| Ed25519 Verification | <1ms |
+| Operation                  | Time (approx) |
+| -------------------------- | ------------- |
+| X25519 Key Generation      | <1ms          |
+| X25519 Diffie-Hellman      | <1ms          |
+| Ed25519 Key Generation     | <1ms          |
+| Ed25519 Signing            | <1ms          |
+| Ed25519 Verification       | <1ms          |
 | XChaCha20-Poly1305 Encrypt | <1ms (per KB) |
 | XChaCha20-Poly1305 Decrypt | <1ms (per KB) |
 
@@ -270,16 +390,18 @@ Enable specific algorithms via Cargo features:
 arduino-cryptography = { path = "../../arduino-cryptography", features = ["mlkem", "mldsa", "xwing", "x25519", "ed25519", "cose"] }
 ```
 
-| Feature | Description | Dependencies |
-|---------|-------------|--------------|
-| `mlkem` | ML-KEM 768 key encapsulation | libcrux-iot-mlkem |
-| `mldsa` | ML-DSA 65 digital signatures | libcrux-iot-mldsa |
-| `xwing` | X-Wing hybrid KEM | mlkem, x25519, libcrux-iot-sha3 |
-| `x25519` | X25519 ECDH | C implementation |
-| `ed25519` | Ed25519 signatures | C implementation (mbedTLS SHA512) |
-| `xchacha20poly1305` | XChaCha20-Poly1305 AEAD | mbedTLS, rng |
-| `cose` | COSE_Sign1 (RFC 9052) | mldsa |
-| `rng` | Hardware RNG support | Zephyr entropy API |
+| Feature             | Description                   | Dependencies                      |
+| ------------------- | ----------------------------- | --------------------------------- |
+| `mlkem`             | ML-KEM 768 key encapsulation  | libcrux-iot-mlkem                 |
+| `mldsa`             | ML-DSA 65 digital signatures  | libcrux-iot-mldsa                 |
+| `xwing`             | X-Wing hybrid KEM             | mlkem, x25519, libcrux-iot-sha3   |
+| `x25519`            | X25519 ECDH                   | C implementation                  |
+| `ed25519`           | Ed25519 signatures            | C implementation (mbedTLS SHA512) |
+| `xchacha20poly1305` | XChaCha20-Poly1305 AEAD       | mbedTLS, rng                      |
+| `saga`              | SAGA anonymous credentials    | curve25519-dalek, sha2, rng       |
+| `saga_xwing`        | SAGA + X-Wing hybrid protocol | saga, xwing, xchacha20poly1305    |
+| `cose`              | COSE_Sign1 (RFC 9052)         | mldsa                             |
+| `rng`               | Hardware RNG support          | Zephyr entropy API                |
 
 ## CMakeLists.txt Setup
 
@@ -289,7 +411,7 @@ For features requiring C code, add to your CMakeLists.txt:
 # Add X25519 implementation
 target_sources(app PRIVATE ${CMAKE_SOURCE_DIR}/../../arduino-cryptography/c/x25519.c)
 
-# Add Ed25519 implementation  
+# Add Ed25519 implementation
 target_sources(app PRIVATE ${CMAKE_SOURCE_DIR}/../../arduino-cryptography/c/ed25519.c)
 
 # Add XChaCha20-Poly1305 implementation (requires mbedTLS)
@@ -329,6 +451,8 @@ CONFIG_MBEDTLS_HEAP_SIZE=8192
 - [RFC 8032](https://datatracker.ietf.org/doc/html/rfc8032) - Edwards-Curve Digital Signature Algorithm (Ed25519)
 - [RFC 8439](https://datatracker.ietf.org/doc/html/rfc8439) - ChaCha20 and Poly1305 for IETF Protocols
 - [RFC 9052](https://datatracker.ietf.org/doc/html/rfc9052) - CBOR Object Signing and Encryption (COSE)
+- [SAGA Paper](https://eprint.iacr.org/2025/2156.pdf) - Multi-Verifier Keyed-Verification
+  Anonymous Credentials
 
 ## License
 

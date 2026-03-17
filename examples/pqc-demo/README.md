@@ -9,6 +9,10 @@ This example demonstrates comprehensive cryptographic operations running entirel
 - **ML-DSA 65** (FIPS 204): Post-quantum digital signatures (NIST Level 3)
 - **X-Wing**: Hybrid PQ/classical KEM combining ML-KEM-768 + X25519
 
+### Anonymous Credentials
+- **SAGA**: BBS-style MAC scheme for anonymous credentials with unlinkable presentations
+- **SAGA + X-Wing**: Credential-protected post-quantum key exchange
+
 ### Classical Cryptography
 - **X25519**: Elliptic curve Diffie-Hellman key exchange
 - **Ed25519**: Elliptic curve digital signatures
@@ -45,16 +49,18 @@ make pqc-demo
 # Ping the MCU
 make pqc-ping
 
-# Fast demos (< 3 seconds)
-make pqc CMD='--mlkem-demo'      # ML-KEM 768 key encapsulation
-make pqc CMD='--xwing-demo'      # X-Wing hybrid PQ KEM (ML-KEM + X25519)
-make pqc CMD='--xchacha20-demo'  # XChaCha20-Poly1305 AEAD
-make pqc CMD='--x25519-demo'     # X25519 ECDH key exchange
-make pqc CMD='--ed25519-demo'    # Ed25519 digital signatures
+# Fast demos (< 5 seconds)
+make pqc CMD='--mlkem-demo'        # ML-KEM 768 key encapsulation
+make pqc CMD='--xwing-demo'        # X-Wing hybrid PQ KEM (ML-KEM + X25519)
+make pqc CMD='--xchacha20-demo'    # XChaCha20-Poly1305 AEAD
+make pqc CMD='--x25519-demo'       # X25519 ECDH key exchange
+make pqc CMD='--ed25519-demo'      # Ed25519 digital signatures
+make pqc CMD='--saga-demo'         # SAGA anonymous credentials
+make pqc CMD='--saga-xwing-demo'   # SAGA + X-Wing credential key exchange
 
 # Slow demos (60+ seconds)
-make pqc CMD='--mldsa-demo'      # ML-DSA 65 signatures
-make pqc CMD='--cose-demo'       # COSE_Sign1 with ML-DSA
+make pqc CMD='--mldsa-demo'        # ML-DSA 65 signatures
+make pqc CMD='--cose-demo'         # COSE_Sign1 with ML-DSA
 
 # Show all options
 make pqc CMD='--help'
@@ -98,6 +104,35 @@ X-Wing provides IND-CCA2 security if either ML-KEM or X25519 remains secure - he
 4. **Decryption**: Authenticates and decrypts the message
 5. **Verification**: Confirms decrypted plaintext matches original
 
+### SAGA Demo (~5 seconds)
+
+1. **Setup**: Generates SAGA parameters and key pair (issuer)
+2. **Credential Issuance**: Issues credential with 3 attributes (device_class, permission_level, issued_epoch)
+3. **Holder Verification**: Holder verifies credential using public key
+4. **Presentation Creation**: Creates unlinkable presentation (randomized for privacy)
+5. **Predicate Check**: Holder verifies predicate consistency
+6. **Issuer Verification**: Issuer verifies the randomized presentation
+7. **Unlinkability Demo**: Creates second presentation, shows they are different but both verify
+
+SAGA provides anonymous credentials where multiple presentations of the same credential cannot be linked together.
+
+### SAGA + X-Wing Demo (~4 seconds)
+
+1. **Issuer Setup**: Creates SAGA parameters and key pair
+2. **Credential Issuance**: Issues credential to device (2 attributes)
+3. **Device Initiates**: Generates X-Wing keypair + SAGA presentation (proves credential)
+4. **Server Responds**: Verifies presentation + encapsulates shared secret + encrypts payload
+5. **Device Completes**: Decapsulates shared secret + decrypts payload
+6. **Verification**: Confirms shared secrets match and payload decrypted correctly
+
+Security properties:
+- **Post-quantum forward secrecy** via ML-KEM-768
+- **Classical forward secrecy** via X25519
+- **Anonymous authentication** via SAGA unlinkable presentations
+- **Authenticated encryption** via XChaCha20-Poly1305
+
+Use case: Device proves it has a valid credential while establishing a quantum-resistant encrypted channel, without revealing its identity across sessions.
+
 ### ML-DSA Demo (~60+ seconds)
 
 1. **Key Generation**: Generates ML-DSA 65 key pair (1952 byte verification key)
@@ -132,6 +167,8 @@ Note: ML-DSA operations are computationally intensive on Cortex-M33.
 - `xchacha20.run_demo` - XChaCha20-Poly1305 AEAD demo
 - `x25519.run_demo` - X25519 ECDH demo
 - `ed25519.run_demo` - Ed25519 signature demo
+- `saga.run_demo` - SAGA anonymous credentials demo
+- `saga_xwing.run_demo` - SAGA + X-Wing credential key exchange demo
 - `cose.run_demo` - COSE_Sign1 with ML-DSA demo
 
 ### Core
@@ -161,6 +198,15 @@ Note: ML-DSA operations are computationally intensive on Cortex-M33.
 | X-Wing | Secret Key | 32 |
 | X-Wing | Ciphertext | 1,120 |
 | X-Wing | Shared Secret | 32 |
+
+### Anonymous Credentials
+
+| Algorithm | Component | Size (bytes) |
+|-----------|-----------|--------------|
+| SAGA | Scalar | 32 |
+| SAGA | Point (compressed) | 32 |
+| SAGA | Tag (credential) | ~160 |
+| SAGA | Presentation | ~96 |
 
 ### Classical
 
@@ -195,6 +241,16 @@ Note: ML-DSA operations are computationally intensive on Cortex-M33.
 | XChaCha20-Poly1305 Encrypt | <1ms |
 | XChaCha20-Poly1305 Decrypt | <1ms |
 
+### Anonymous Credential Operations (~5 seconds total)
+
+| Operation | Time (approx) |
+|-----------|---------------|
+| SAGA Setup (3 attrs) | ~500ms |
+| SAGA MAC (issue) | ~200ms |
+| SAGA Create Presentation | ~300ms |
+| SAGA Verify Presentation | ~200ms |
+| SAGA + X-Wing Full Protocol | ~4s |
+
 ### Slow Operations (> 30 seconds)
 
 | Operation | Time (approx) |
@@ -205,9 +261,11 @@ Note: ML-DSA operations are computationally intensive on Cortex-M33.
 
 ## Memory Requirements
 
-- Stack: 48KB (configured in prj.conf)
+- Stack: 96KB (configured in prj.conf, increased for SAGA + X-Wing)
 - Heap: 32KB
-- Flash: ~260KB (with all crypto algorithms enabled including XChaCha20-Poly1305)
+- Flash: ~311KB (with all crypto algorithms enabled including SAGA + X-Wing)
+
+Note: The SAGA + X-Wing demo requires extra stack space (~96KB) because the protocol holds multiple large crypto structures simultaneously (X-Wing secret key ~3.6KB, public keys ~1.2KB each, ciphertext ~1.1KB).
 
 ## Implementation Notes
 
@@ -278,6 +336,8 @@ pqc-client --xwing-demo         Run X-Wing hybrid PQ KEM demo
 pqc-client --xchacha20-demo     Run XChaCha20-Poly1305 AEAD demo
 pqc-client --x25519-demo        Run X25519 ECDH demo
 pqc-client --ed25519-demo       Run Ed25519 signature demo
+pqc-client --saga-demo          Run SAGA anonymous credentials demo
+pqc-client --saga-xwing-demo    Run SAGA + X-Wing credential key exchange
 pqc-client --cose-demo          Run COSE_Sign1 demo
 pqc-client --demo               Run local simulation demo
 pqc-client --help               Show all options

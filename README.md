@@ -87,13 +87,15 @@ Linux-side RPC client library for calling MCU methods.
 
 ### arduino-cryptography (MCU)
 
-Comprehensive cryptography library for the MCU, providing both post-quantum and classical cryptographic primitives.
+Comprehensive cryptography library for the MCU, providing post-quantum, classical, and anonymous credential cryptographic primitives.
 
 **Features:**
 
 - **ML-KEM 768** (FIPS 203) - Post-quantum key encapsulation
 - **ML-DSA 65** (FIPS 204) - Post-quantum digital signatures
 - **X-Wing** (draft-connolly-cfrg-xwing-kem) - Hybrid PQ/classical KEM combining ML-KEM-768 + X25519
+- **SAGA** - BBS-style MAC for anonymous credentials with unlinkable presentations
+- **SAGA + X-Wing** - Credential-protected post-quantum key exchange
 - **XChaCha20-Poly1305** - Authenticated encryption with 24-byte nonces (via mbedTLS)
 - **X25519** - Classical elliptic curve Diffie-Hellman key exchange
 - **Ed25519** - Classical elliptic curve digital signatures
@@ -126,11 +128,13 @@ Post-quantum key exchange demonstration using ML-KEM 768 between MCU and Linux.
 
 ### pqc-demo (MCU) + pqc-client (Linux)
 
-Complete cryptography demonstration showcasing both post-quantum and classical algorithms:
+Complete cryptography demonstration showcasing post-quantum, classical, and anonymous credential algorithms:
 
 - **ML-KEM 768** - Post-quantum key encapsulation (~2 seconds)
 - **ML-DSA 65** - Post-quantum digital signatures (~60+ seconds)
 - **X-Wing** - Hybrid PQ KEM combining ML-KEM-768 + X25519 (~2 seconds)
+- **SAGA** - Anonymous credentials with unlinkable presentations (~5 seconds)
+- **SAGA + X-Wing** - Credential-protected PQ key exchange (~4 seconds)
 - **XChaCha20-Poly1305** - Authenticated encryption with 24-byte nonces (~1 second)
 - **X25519** - Classical ECDH key exchange (~1 second)
 - **Ed25519** - Classical digital signatures (~1 second)
@@ -245,6 +249,12 @@ make pqc CMD='--x25519-demo'
 # Run Ed25519 signature demo (fast, ~1 second)
 make pqc CMD='--ed25519-demo'
 
+# Run SAGA anonymous credentials demo (fast, ~5 seconds)
+make pqc CMD='--saga-demo'
+
+# Run SAGA + X-Wing credential key exchange (fast, ~4 seconds)
+make pqc CMD='--saga-xwing-demo'
+
 # Run ML-DSA demo (slow, >60 seconds)
 make pqc CMD='--mldsa-demo'
 
@@ -258,6 +268,8 @@ make pqc CMD='--cose-demo'
 |---------|---------|
 | Key | Generating keys |
 | Lock | Encrypting/decrypting |
+| Pen | Signing |
+| Shield | Verifying |
 | Checkmark | Success |
 | X | Failure |
 

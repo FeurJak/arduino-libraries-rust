@@ -180,3 +180,34 @@ impl HwRng {
         self.random_array()
     }
 }
+
+// Implement rand_core 0.6 traits for compatibility with curve25519-dalek
+// (used by SAGA module)
+#[cfg(feature = "saga")]
+impl rand_core::RngCore for HwRng {
+    fn next_u32(&mut self) -> u32 {
+        let mut buf = [0u8; 4];
+        self.fill_bytes(&mut buf);
+        u32::from_le_bytes(buf)
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let mut buf = [0u8; 8];
+        self.fill_bytes(&mut buf);
+        u64::from_le_bytes(buf)
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        // Delegate to our existing fill_bytes implementation
+        HwRng::fill_bytes(self, dest);
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
+        self.fill_bytes(dest);
+        Ok(())
+    }
+}
+
+/// HwRng is a cryptographically secure RNG (backed by hardware TRNG)
+#[cfg(feature = "saga")]
+impl rand_core::CryptoRng for HwRng {}

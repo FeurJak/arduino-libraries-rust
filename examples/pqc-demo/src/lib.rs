@@ -35,9 +35,12 @@
 
 use log::warn;
 
-use arduino_cryptography::{dsa, ed25519, kem, rng::HwRng, x25519, xchacha20poly1305, xwing};
+use arduino_cryptography::{
+    dsa, ed25519, kem, rng::HwRng, saga, saga_xwing, x25519, xchacha20poly1305, xwing,
+};
 use arduino_led_matrix::{Frame, LedMatrix};
 use arduino_rpc_bridge::{RpcResult, RpcServer, SpiTransport, Transport};
+use saga::Identity; // Re-exported from saga module for Point::identity()
 use zephyr::time::{sleep, Duration};
 
 // Global state
@@ -983,6 +986,486 @@ fn handle_xchacha20_demo(_count: usize) -> RpcResult {
     }
 }
 
+/// Run SAGA anonymous credential demo on-device
+/// Demonstrates: keygen, MAC issuance, unlinkable presentation
+fn handle_saga_demo(_count: usize) -> RpcResult {
+    warn!("");
+    warn!("========================================");
+    warn!("  SAGA Demo (BBS-style MAC)");
+    warn!("  Anonymous Credentials");
+    warn!("  Unlinkable Presentations");
+    warn!("  Using Hardware TRNG for randomness");
+    warn!("========================================");
+    warn!("");
+
+    // Initialize hardware RNG (mut because SAGA needs mutable reference)
+    let mut rng = HwRng::new();
+
+    // Use 3 attributes for this demo
+    let num_attrs = 3;
+
+    // Step 1: Setup key pair (issuer side)
+    warn!("Step 1: Setting up SAGA parameters and key pair...");
+    warn!("  (Number of attributes: {})", num_attrs);
+    show_key();
+    sleep(Duration::millis_at_least(500));
+
+    let keypair = match saga::KeyPair::setup(&mut rng, num_attrs) {
+        Ok(kp) => kp,
+        Err(e) => {
+            warn!("  FAILURE: Setup failed: {:?}", e);
+            show_x();
+            return RpcResult::Error(-1, "SAGA setup failed");
+        }
+    };
+
+    let params = keypair.params();
+    let pk = keypair.pk();
+
+    warn!("  Parameters generated!");
+    warn!("  Max attributes: {}", saga::MAX_ATTRS);
+    warn!("  Active attributes: {}", num_attrs);
+
+    // Step 2: Create messages (attributes) as curve points
+    warn!("");
+    warn!("Step 2: Creating credential attributes...");
+    sleep(Duration::millis_at_least(300));
+
+    // Create attribute points: M_j = scalar_j * G
+    // In real use, these would be hash-to-curve of actual attribute values
+    let mut messages = [saga::Point::identity(); saga::MAX_ATTRS];
+    for i in 0..num_attrs {
+        let scalar = saga::Scalar::from((i + 1) as u64);
+        messages[i] = saga::smul(&params.g, &scalar);
+    }
+
+    warn!("  Attribute 0: device_class (encoded as 1*G)");
+    warn!("  Attribute 1: permission_level (encoded as 2*G)");
+    warn!("  Attribute 2: issued_epoch (encoded as 3*G)");
+
+    // Step 3: Issue credential (compute MAC)
+    warn!("");
+    warn!("Step 3: Issuing credential (computing MAC)...");
+    show_signature();
+    sleep(Duration::millis_at_least(500));
+
+    let tag = match keypair.mac(&mut rng, &messages[..num_attrs]) {
+        Ok(t) => t,
+        Err(e) => {
+            warn!("  FAILURE: MAC computation failed: {:?}", e);
+            show_x();
+            return RpcResult::Error(-2, "MAC failed");
+        }
+    };
+
+    warn!("  Credential issued!");
+    warn!("  Tag contains:");
+    warn!("    - MAC point A (32 bytes compressed)");
+    warn!("    - Randomness scalar e (32 bytes)");
+    warn!("    - NIZK proof of correctness");
+
+    // Step 4: Verify credential (holder side, using public key)
+    warn!("");
+    warn!("Step 4: Holder verifying credential (with public key)...");
+    show_shield();
+    sleep(Duration::millis_at_least(300));
+
+    if tag.verify(params, pk, &messages[..num_attrs]) {
+        warn!("  Credential verified by holder!");
+    } else {
+        warn!("  FAILURE: Credential verification failed!");
+        show_x();
+        return RpcResult::Error(-3, "Holder verification failed");
+    }
+
+    // Step 5: Create unlinkable presentation
+    warn!("");
+    warn!("Step 5: Creating unlinkable presentation...");
+    warn!("  (Randomizing credential for privacy)");
+    show_lock();
+    sleep(Duration::millis_at_least(500));
+
+    let predicate = match tag.get_predicate(&mut rng, params, pk, &messages[..num_attrs]) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("  FAILURE: Presentation creation failed: {:?}", e);
+            show_x();
+            return RpcResult::Error(-4, "Presentation failed");
+        }
+    };
+
+    let presentation = predicate.presentation();
+    let commitments = predicate.commitments();
+
+    warn!("  Presentation created!");
+    warn!("  Contains:");
+    warn!("    - Randomized MAC commitment C_A");
+    warn!("    - Proof term T");
+    warn!("    - {} randomized attribute commitments", num_attrs);
+
+    // Step 6: Holder checks predicate
+    warn!("");
+    warn!("Step 6: Holder verifying predicate consistency...");
+    sleep(Duration::millis_at_least(200));
+
+    match predicate.check(params, pk) {
+        Ok(true) => warn!("  Predicate check passed!"),
+        Ok(false) => {
+            warn!("  FAILURE: Predicate check failed!");
+            show_x();
+            return RpcResult::Error(-5, "Predicate check failed");
+        }
+        Err(e) => {
+            warn!("  FAILURE: Predicate check error: {:?}", e);
+            show_x();
+            return RpcResult::Error(-6, "Predicate error");
+        }
+    }
+
+    // Step 7: Verify presentation (issuer/verifier side)
+    warn!("");
+    warn!("Step 7: Issuer verifying presentation...");
+    warn!("  (Using secret key to verify randomized credential)");
+    show_shield();
+    sleep(Duration::millis_at_least(500));
+
+    match keypair.verify_presentation(&presentation, commitments) {
+        Ok(true) => {
+            warn!("  Presentation verified by issuer!");
+        }
+        Ok(false) => {
+            warn!("  FAILURE: Presentation verification failed!");
+            show_x();
+            return RpcResult::Error(-7, "Presentation invalid");
+        }
+        Err(e) => {
+            warn!("  FAILURE: Presentation verification error: {:?}", e);
+            show_x();
+            return RpcResult::Error(-8, "Verification error");
+        }
+    }
+
+    // Step 8: Demonstrate unlinkability
+    warn!("");
+    warn!("Step 8: Demonstrating unlinkability...");
+    warn!("  (Creating second presentation from same credential)");
+    sleep(Duration::millis_at_least(300));
+
+    let predicate2 = match tag.get_predicate(&mut rng, params, pk, &messages[..num_attrs]) {
+        Ok(p) => p,
+        Err(_) => {
+            warn!("  FAILURE: Second presentation failed!");
+            show_x();
+            return RpcResult::Error(-9, "Second presentation failed");
+        }
+    };
+
+    let presentation2 = predicate2.presentation();
+
+    // Compare the two presentations
+    let p1_bytes = presentation.c_a.compress().to_bytes();
+    let p2_bytes = presentation2.c_a.compress().to_bytes();
+
+    let different = p1_bytes != p2_bytes;
+
+    if different {
+        warn!("  Two presentations from same credential are DIFFERENT!");
+        warn!(
+            "  Presentation 1 C_A: {:02x}{:02x}{:02x}{:02x}...",
+            p1_bytes[0], p1_bytes[1], p1_bytes[2], p1_bytes[3]
+        );
+        warn!(
+            "  Presentation 2 C_A: {:02x}{:02x}{:02x}{:02x}...",
+            p2_bytes[0], p2_bytes[1], p2_bytes[2], p2_bytes[3]
+        );
+        warn!("");
+        warn!("  => Presentations are UNLINKABLE!");
+    } else {
+        warn!("  WARNING: Presentations appear identical (check RNG)");
+    }
+
+    // Verify second presentation works too
+    match keypair.verify_presentation(&presentation2, predicate2.commitments()) {
+        Ok(true) => {
+            warn!("  Both presentations verify correctly!");
+        }
+        _ => {
+            warn!("  FAILURE: Second presentation didn't verify!");
+            show_x();
+            return RpcResult::Error(-10, "Second verify failed");
+        }
+    }
+
+    warn!("");
+    warn!("========================================");
+    warn!("  SAGA Demo Complete!");
+    warn!("  Anonymous Credential System Working!");
+    warn!("========================================");
+    warn!("");
+    warn!("  Properties demonstrated:");
+    warn!("    - Credential issuance");
+    warn!("    - Holder-side verification");
+    warn!("    - Unlinkable presentations");
+    warn!("    - Issuer-side verification");
+    warn!("");
+
+    show_checkmark();
+    RpcResult::Bool(true)
+}
+
+/// Run SAGA + X-Wing hybrid demo on-device
+/// Demonstrates: credential-protected post-quantum key exchange
+fn handle_saga_xwing_demo(_count: usize) -> RpcResult {
+    warn!("");
+    warn!("========================================");
+    warn!("  SAGA + X-Wing Hybrid Demo");
+    warn!("  Credential-Protected PQ Key Exchange");
+    warn!("  Anonymous Auth + Post-Quantum Keys");
+    warn!("  Using Hardware TRNG for randomness");
+    warn!("========================================");
+    warn!("");
+
+    // Initialize hardware RNG
+    let mut rng = HwRng::new();
+
+    // Use 2 attributes for this demo (simpler)
+    let num_attrs = 2;
+
+    // ==========================================
+    // Phase 1: Setup (Issuer creates parameters)
+    // ==========================================
+    warn!("┌──────────────────────────────────────────────────────────────┐");
+    warn!("│  PHASE 1: Issuer Setup                                       │");
+    warn!("└──────────────────────────────────────────────────────────────┘");
+    warn!("");
+
+    warn!("  [1.1] Creating SAGA parameters and key pair...");
+    show_key();
+    sleep(Duration::millis_at_least(500));
+
+    let saga_keypair = match saga::KeyPair::setup(&mut rng, num_attrs) {
+        Ok(kp) => kp,
+        Err(e) => {
+            warn!("  FAILURE: SAGA setup failed: {:?}", e);
+            show_x();
+            return RpcResult::Error(-1, "SAGA setup failed");
+        }
+    };
+
+    let saga_params = saga_keypair.params();
+    let saga_pk = saga_keypair.pk();
+
+    warn!("  SAGA parameters created!");
+    warn!("  Active attributes: {}", num_attrs);
+
+    // ==========================================
+    // Phase 2: Credential Issuance (to Device)
+    // ==========================================
+    warn!("");
+    warn!("┌──────────────────────────────────────────────────────────────┐");
+    warn!("│  PHASE 2: Credential Issuance                                │");
+    warn!("└──────────────────────────────────────────────────────────────┘");
+    warn!("");
+
+    warn!("  [2.1] Creating device attributes...");
+
+    let mut messages = [saga::Point::identity(); saga::MAX_ATTRS];
+    for i in 0..num_attrs {
+        let scalar = saga::Scalar::from((i + 100) as u64); // Device-specific values
+        messages[i] = saga::smul(&saga_params.g, &scalar);
+    }
+
+    warn!("  Attribute 0: device_id (encoded)");
+    warn!("  Attribute 1: access_level (encoded)");
+
+    warn!("");
+    warn!("  [2.2] Issuing credential to device...");
+    show_signature();
+    sleep(Duration::millis_at_least(400));
+
+    let credential = match saga_keypair.mac(&mut rng, &messages[..num_attrs]) {
+        Ok(t) => t,
+        Err(e) => {
+            warn!("  FAILURE: Credential issuance failed: {:?}", e);
+            show_x();
+            return RpcResult::Error(-2, "Credential issuance failed");
+        }
+    };
+
+    warn!("  Credential issued to device!");
+
+    // ==========================================
+    // Phase 3: Credential-Protected Key Exchange
+    // ==========================================
+    warn!("");
+    warn!("┌──────────────────────────────────────────────────────────────┐");
+    warn!("│  PHASE 3: Credential-Protected Key Exchange                  │");
+    warn!("└──────────────────────────────────────────────────────────────┘");
+    warn!("");
+    warn!("  Protocol: Device proves credential + gets PQ-secure channel");
+    warn!("");
+
+    // Step 3.1: Device initiates (creates X-Wing keypair + SAGA presentation)
+    warn!("  [3.1] Device: Initiating key exchange...");
+    warn!("        - Generating X-Wing (ML-KEM-768 + X25519) keypair");
+    warn!("        - Creating SAGA presentation (proving credential)");
+    show_lock();
+    sleep(Duration::millis_at_least(600));
+
+    let (request, device_state) = match saga_xwing::CredentialKeyExchange::initiate(
+        &mut rng,
+        saga_params,
+        saga_pk,
+        &credential,
+        &messages[..num_attrs],
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            warn!("  FAILURE: Initiate failed: {:?}", e);
+            show_x();
+            return RpcResult::Error(-3, "Initiate failed");
+        }
+    };
+
+    warn!(
+        "        X-Wing public key: {} bytes",
+        xwing::PUBLIC_KEY_SIZE
+    );
+    warn!("        SAGA presentation created!");
+
+    // Step 3.2: Server responds (verifies presentation + encapsulates)
+    warn!("");
+    warn!("  [3.2] Server: Processing request...");
+    warn!("        - Verifying SAGA presentation");
+    warn!("        - Encapsulating shared secret with X-Wing");
+    show_shield();
+    sleep(Duration::millis_at_least(600));
+
+    // Prepare optional payload to send to device
+    let payload = b"Access granted: level=admin";
+
+    let (response, server_keys) = match saga_xwing::CredentialKeyExchange::respond(
+        &mut rng,
+        &saga_keypair,
+        &request,
+        Some(payload),
+    ) {
+        Ok(r) => r,
+        Err(saga_xwing::Error::PresentationInvalid) => {
+            warn!("  FAILURE: Presentation verification failed!");
+            show_x();
+            return RpcResult::Error(-4, "Presentation invalid");
+        }
+        Err(e) => {
+            warn!("  FAILURE: Server respond failed: {:?}", e);
+            show_x();
+            return RpcResult::Error(-5, "Server respond failed");
+        }
+    };
+
+    warn!("        Presentation verified!");
+    warn!(
+        "        X-Wing ciphertext: {} bytes",
+        xwing::CIPHERTEXT_SIZE
+    );
+    warn!("        Encrypted payload attached");
+
+    // Step 3.3: Device completes (decapsulates + decrypts payload)
+    warn!("");
+    warn!("  [3.3] Device: Completing key exchange...");
+    warn!("        - Decapsulating shared secret");
+    warn!("        - Decrypting payload");
+    show_lock();
+    sleep(Duration::millis_at_least(400));
+
+    let (device_keys, decrypted_payload) =
+        match saga_xwing::CredentialKeyExchange::complete(&device_state, &response) {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("  FAILURE: Complete failed: {:?}", e);
+                show_x();
+                return RpcResult::Error(-6, "Complete failed");
+            }
+        };
+
+    warn!("        Shared secret derived!");
+
+    // ==========================================
+    // Phase 4: Verification
+    // ==========================================
+    warn!("");
+    warn!("┌──────────────────────────────────────────────────────────────┐");
+    warn!("│  PHASE 4: Verification                                       │");
+    warn!("└──────────────────────────────────────────────────────────────┘");
+    warn!("");
+
+    // Check shared secrets match
+    warn!("  [4.1] Verifying shared secrets match...");
+
+    let server_ss = server_keys.shared_secret.as_bytes();
+    let device_ss = device_keys.shared_secret.as_bytes();
+
+    if server_ss != device_ss {
+        warn!("  FAILURE: Shared secrets don't match!");
+        show_x();
+        return RpcResult::Error(-7, "Shared secrets mismatch");
+    }
+
+    warn!("        Shared secrets match!");
+    warn!(
+        "        SS prefix: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        server_ss[0],
+        server_ss[1],
+        server_ss[2],
+        server_ss[3],
+        server_ss[4],
+        server_ss[5],
+        server_ss[6],
+        server_ss[7]
+    );
+
+    // Check decrypted payload
+    warn!("");
+    warn!("  [4.2] Verifying decrypted payload...");
+
+    if let Some(decrypted) = decrypted_payload {
+        if &decrypted[..payload.len()] == payload {
+            warn!("        Payload decrypted correctly!");
+            warn!("        Message: \"Access granted: level=admin\"");
+        } else {
+            warn!("  FAILURE: Payload mismatch!");
+            show_x();
+            return RpcResult::Error(-8, "Payload mismatch");
+        }
+    } else {
+        warn!("  FAILURE: No payload received!");
+        show_x();
+        return RpcResult::Error(-9, "No payload");
+    }
+
+    // ==========================================
+    // Summary
+    // ==========================================
+    warn!("");
+    warn!("╔══════════════════════════════════════════════════════════════╗");
+    warn!("║             SAGA + X-Wing Demo Complete!                     ║");
+    warn!("╠══════════════════════════════════════════════════════════════╣");
+    warn!("║  SAGA:   Anonymous credential presentation verified          ║");
+    warn!("║  X-Wing: Post-quantum key encapsulation successful           ║");
+    warn!("║  AEAD:   Encrypted payload delivered and decrypted           ║");
+    warn!("║                                                              ║");
+    warn!("║  Security Properties:                                        ║");
+    warn!("║  - Post-quantum forward secrecy (ML-KEM-768)                 ║");
+    warn!("║  - Classical forward secrecy (X25519)                        ║");
+    warn!("║  - Anonymous authentication (SAGA unlinkable)                ║");
+    warn!("║  - Authenticated encryption (XChaCha20-Poly1305)             ║");
+    warn!("╚══════════════════════════════════════════════════════════════╝");
+    warn!("");
+
+    show_checkmark();
+    RpcResult::Bool(true)
+}
+
 // NOTE: COSE_Sign1 demo temporarily disabled due to ML-DSA performance issues.
 // The arduino-zcbor crate with COSE support is ready and working, but ML-DSA
 // operations currently timeout (>3 minutes). Once the ML-DSA performance
@@ -1021,6 +1504,8 @@ extern "C" fn rust_main() {
     warn!("║           ML-DSA 65  (FIPS 204) [performance issue]          ║");
     warn!("║           X-Wing (ML-KEM + X25519 Hybrid KEM)                ║");
     warn!("║           XChaCha20-Poly1305 (AEAD Encryption)               ║");
+    warn!("║           SAGA (Anonymous Credentials / BBS-MAC)             ║");
+    warn!("║           SAGA+X-Wing (Credential-Protected PQ KEM)         ║");
     warn!("║           Ed25519 / X25519 (RFC 8032/7748)                   ║");
     warn!("║           Hardware TRNG (STM32U585)                          ║");
     warn!("║                                                              ║");
@@ -1103,6 +1588,8 @@ extern "C" fn rust_main() {
     server.register("x25519.run_demo", handle_x25519_demo);
     server.register("xwing.run_demo", handle_xwing_demo);
     server.register("xchacha20.run_demo", handle_xchacha20_demo);
+    server.register("saga.run_demo", handle_saga_demo);
+    server.register("saga_xwing.run_demo", handle_saga_xwing_demo);
     // NOTE: cose.run_demo disabled due to ML-DSA performance issues
 
     // LED matrix control
@@ -1119,6 +1606,8 @@ extern "C" fn rust_main() {
     warn!("  - x25519.run_demo   -> X25519 ECDH demo (fast!)");
     warn!("  - xwing.run_demo    -> X-Wing hybrid PQ KEM demo");
     warn!("  - xchacha20.run_demo -> XChaCha20-Poly1305 AEAD demo");
+    warn!("  - saga.run_demo     -> SAGA anonymous credentials demo");
+    warn!("  - saga_xwing.run_demo -> SAGA+X-Wing credential key exchange");
     warn!("  - led_matrix.clear  -> clear LED display");
     warn!("");
     warn!("NOTE: ML-DSA operations have a known performance issue");

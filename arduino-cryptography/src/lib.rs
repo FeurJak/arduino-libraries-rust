@@ -55,6 +55,32 @@ pub mod xwing;
 #[cfg(feature = "xchacha20poly1305")]
 pub mod xchacha20poly1305;
 
+/// SAGA anonymous credential scheme (BBS-style MAC).
+///
+/// Provides:
+/// - MAC-based credentials with zero-knowledge proofs
+/// - Unlinkable presentations (same credential cannot be correlated across uses)
+/// - Selective disclosure of attributes
+///
+/// Note: SAGA is MAC-based, requiring the issuer's secret key for verification.
+/// This differs from BBS+ signatures which support public verification.
+///
+/// See the module documentation for usage examples.
+#[cfg(feature = "saga")]
+pub mod saga;
+
+/// SAGA + X-Wing hybrid protocol for credential-protected key exchange.
+///
+/// Combines:
+/// - SAGA: Anonymous credential verification
+/// - X-Wing: Post-quantum secure key encapsulation
+/// - XChaCha20-Poly1305: Symmetric encryption for payload
+///
+/// Use case: Device proves credential possession while establishing a
+/// quantum-resistant encrypted channel with the server.
+#[cfg(feature = "saga_xwing")]
+pub mod saga_xwing;
+
 /// Re-export ML-KEM types and functions
 pub mod mlkem {
     #[cfg(feature = "mlkem512")]
