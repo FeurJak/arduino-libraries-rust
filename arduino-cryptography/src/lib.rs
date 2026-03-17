@@ -254,4 +254,15 @@ pub mod dsa {
     ) -> Result<(), VerificationError> {
         ml_dsa_65::verify(verification_key, message, context, signature)
     }
+
+    /// Create a signature from raw bytes
+    ///
+    /// # Arguments
+    /// * `bytes` - The signature bytes (must be SIGNATURE_SIZE bytes)
+    ///
+    /// # Returns
+    /// The signature
+    pub fn signature_from_bytes(bytes: [u8; SIGNATURE_SIZE]) -> Signature {
+        Signature::new(bytes)
+    }
 }

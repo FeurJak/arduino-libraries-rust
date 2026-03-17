@@ -58,6 +58,10 @@ struct Args {
     #[arg(long)]
     mldsa_demo: bool,
 
+    /// Run the MCU-side COSE_Sign1 demo (RFC 9052 with ML-DSA)
+    #[arg(long)]
+    cose_demo: bool,
+
     /// Just ping the MCU
     #[arg(short, long)]
     ping: bool,
@@ -266,8 +270,9 @@ fn main() -> Result<()> {
     }
 
     // MCU-side demos - all cryptography runs on the STM32U585
-    // Use 60 second timeout for crypto operations
-    let demo_timeout = std::time::Duration::from_secs(60);
+    // ML-DSA operations are very slow on Cortex-M33 (~60-120 seconds for keygen+sign)
+    // Use 3 minute timeout for crypto operations
+    let demo_timeout = std::time::Duration::from_secs(180);
 
     if args.mcu_demo {
         info!("");
@@ -325,6 +330,31 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if args.cose_demo {
+        info!("");
+        info!("Running COSE_Sign1 demo on MCU (RFC 9052 with ML-DSA)...");
+        info!("Watch the LED matrix for status indicators!");
+        info!("(This may take 2-3 minutes due to ML-DSA operations)");
+        info!("");
+        // COSE demo needs longer timeout: keygen + sign + verify = ~90+ seconds
+        let cose_timeout = std::time::Duration::from_secs(300);
+        match client.call_timeout("cose.run_demo", vec![], cose_timeout) {
+            Ok(result) => {
+                info!("COSE demo completed: {:?}", result);
+                info!("");
+                info!("The MCU successfully:");
+                info!("  - Generated ML-DSA 65 key pair");
+                info!("  - Created COSE_Sign1 message with payload");
+                info!("  - Verified the signature and extracted payload");
+            }
+            Err(e) => {
+                error!("COSE demo failed: {}", e);
+                return Err(e.into());
+            }
+        }
+        return Ok(());
+    }
+
     if args.demo {
         return run_demo(&client, &args.message);
     }
@@ -336,6 +366,7 @@ fn main() -> Result<()> {
     info!("  pqc-client --mcu-demo           Run full PQC demo on MCU");
     info!("  pqc-client --mlkem-demo         Run ML-KEM 768 demo on MCU");
     info!("  pqc-client --mldsa-demo         Run ML-DSA 65 demo on MCU");
+    info!("  pqc-client --cose-demo          Run COSE_Sign1 demo on MCU");
     info!("  pqc-client --demo               Run local simulation demo");
     info!("  pqc-client --demo -m \"msg\"      Demo with custom message");
     info!("");

@@ -114,7 +114,7 @@ impl HwRng {
     }
 
     /// Generate a fixed-size array of random bytes.
-    ///
+    ///z
     /// This is a convenience method for generating randomness of a known size
     /// at compile time, which is common for cryptographic operations.
     ///

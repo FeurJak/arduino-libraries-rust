@@ -68,8 +68,8 @@ else ifeq ($(APP),mlkem-demo)
     MULTI_LIB := yes
 else ifeq ($(APP),pqc-demo)
     APP_DIR := examples/pqc-demo
-    LIB_NAME := arduino-led-matrix arduino-rpc-bridge arduino-cryptography
-    LIB_PATH_PATTERN := ../../arduino-led-matrix ../../arduino-rpc-bridge ../../arduino-cryptography
+    LIB_NAME := arduino-led-matrix arduino-rpc-bridge arduino-cryptography arduino-zcbor
+    LIB_PATH_PATTERN := ../../arduino-led-matrix ../../arduino-rpc-bridge ../../arduino-cryptography ../../arduino-zcbor
     MULTI_LIB := yes
 else ifeq ($(APP),weather-display)
     # Linux app - no MCU build needed
@@ -207,6 +207,7 @@ else ifeq ($(MULTI_LIB),yes)
 		-v "$$(pwd)/arduino-led-matrix:/lib-led-matrix:ro" \
 		-v "$$(pwd)/arduino-rpc-bridge:/lib-rpc-bridge:ro" \
 		-v "$$(pwd)/arduino-cryptography:/lib-cryptography:ro" \
+		-v "$$(pwd)/arduino-zcbor:/lib-zcbor:ro" \
 		-v "$$(pwd)/$(APP_DIR):/app:ro" \
 		-v "$$(pwd)/$(OUTPUT_DIR):/output" \
 		$(IMAGE_NAME) \
@@ -218,12 +219,15 @@ else ifeq ($(MULTI_LIB),yes)
 			mkdir -p /tmp/app/arduino-led-matrix && \
 			mkdir -p /tmp/app/arduino-rpc-bridge && \
 			mkdir -p /tmp/app/arduino-cryptography && \
+			mkdir -p /tmp/app/arduino-zcbor && \
 			cp -r /lib-led-matrix/* /tmp/app/arduino-led-matrix/ && \
 			cp -r /lib-rpc-bridge/* /tmp/app/arduino-rpc-bridge/ && \
 			if [ -d /lib-cryptography ]; then cp -r /lib-cryptography/* /tmp/app/arduino-cryptography/ 2>/dev/null || true; fi && \
+			if [ -d /lib-zcbor ]; then cp -r /lib-zcbor/* /tmp/app/arduino-zcbor/ 2>/dev/null || true; fi && \
 			sed -i "s|path = \"../../arduino-led-matrix\"|path = \"arduino-led-matrix\"|" /tmp/app/Cargo.toml && \
 			sed -i "s|path = \"../../arduino-rpc-bridge\"|path = \"arduino-rpc-bridge\"|" /tmp/app/Cargo.toml && \
 			sed -i "s|path = \"../../arduino-cryptography\"|path = \"arduino-cryptography\"|" /tmp/app/Cargo.toml 2>/dev/null || true && \
+			sed -i "s|path = \"../../arduino-zcbor\"|path = \"arduino-zcbor\"|" /tmp/app/Cargo.toml 2>/dev/null || true && \
 			echo "Configuring build..." && \
 			west build -p auto -b $(BOARD) /tmp/app -d /tmp/build && \
 			echo "Copying artifacts..." && \
@@ -423,6 +427,13 @@ pqc-demo-dsa: check-adb
 	@echo "Watch the LED matrix for status indicators!"
 	@echo ""
 	adb shell "/home/arduino/pqc-client --mldsa-demo"
+
+# Run COSE_Sign1 demo on MCU (slow - may take >60s)
+cose-demo: check-adb
+	@echo "$(CYAN)Running COSE_Sign1 demo on MCU (RFC 9052 with ML-DSA)...$(NC)"
+	@echo "Watch the LED matrix for status indicators!"
+	@echo ""
+	adb shell "/home/arduino/pqc-client --cose-demo"
 
 # Ping the MCU
 pqc-ping: check-adb

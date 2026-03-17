@@ -6,13 +6,14 @@
 # Demonstrates:
 # - ML-KEM 768 key encapsulation (FIPS 203)
 # - ML-DSA 65 digital signatures (FIPS 204)
+# - COSE_Sign1 with ML-DSA (RFC 9052)
 
 [package]
 # Zephyr requires the package name to be "rustapp"
 name = "rustapp"
 version = "0.1.0"
 edition = "2021"
-description = "Post-quantum cryptography demo for Arduino Uno Q (ML-KEM + ML-DSA)"
+description = "Post-quantum cryptography demo for Arduino Uno Q (ML-KEM + ML-DSA + COSE)"
 license = "Apache-2.0 OR MIT"
 authors = ["Arduino Rust Team"]
 
@@ -29,6 +30,7 @@ log = "0.4"
 arduino-led-matrix = { path = "arduino-led-matrix" }
 arduino-rpc-bridge = { path = "arduino-rpc-bridge" }
 arduino-cryptography = { path = "arduino-cryptography" }
+arduino-zcbor = { path = "arduino-zcbor", features = ["cose"] }
 
 [profile.release]
 opt-level = "s"

@@ -32,6 +32,7 @@ use log::warn;
 use arduino_cryptography::{dsa, kem, rng::HwRng};
 use arduino_led_matrix::{Frame, LedMatrix};
 use arduino_rpc_bridge::{RpcResult, RpcServer, SpiTransport, Transport};
+use arduino_zcbor::cose::CoseSign1;
 use zephyr::time::{sleep, Duration};
 
 // Global state
@@ -161,7 +162,7 @@ fn handle_ping(_count: usize) -> RpcResult {
 
 /// Handle version request
 fn handle_version(_count: usize) -> RpcResult {
-    RpcResult::Str("pqc-demo 0.3.0-hwrng")
+    RpcResult::Str("pqc-demo 0.4.0-cose")
 }
 
 /// Run complete ML-KEM demo on-device
@@ -473,6 +474,122 @@ fn handle_matrix_clear(_count: usize) -> RpcResult {
     RpcResult::Bool(true)
 }
 
+// Static buffer for COSE output to avoid stack overflow
+static mut COSE_OUTPUT: [u8; 3500] = [0u8; 3500];
+
+/// Run COSE_Sign1 demo with ML-DSA 65
+/// Demonstrates creating RFC 9052 compliant signed messages
+/// NOTE: Verification is skipped to reduce demo time (~30s vs ~90s)
+fn handle_cose_demo(_count: usize) -> RpcResult {
+    warn!("");
+    warn!("========================================");
+    warn!("  COSE_Sign1 Demo (RFC 9052)");
+    warn!("  with ML-DSA 65 (FIPS 204)");
+    warn!("  Using Hardware TRNG for randomness");
+    warn!("========================================");
+    warn!("");
+
+    // Initialize hardware RNG
+    warn!("Initializing hardware RNG...");
+    let rng = HwRng::new();
+    warn!("RNG ready");
+
+    // Step 1: Generate ML-DSA key pair
+    warn!("");
+    warn!("Step 1: Generating ML-DSA 65 key pair...");
+    warn!("  (This takes ~30 seconds on Cortex-M33)");
+    show_key();
+    sleep(Duration::millis_at_least(300));
+
+    warn!("  Generating keygen randomness...");
+    let keygen_randomness: [u8; dsa::KEYGEN_RANDOMNESS_SIZE] = rng.random_array();
+    warn!("  Calling dsa::generate_key_pair...");
+    let key_pair = dsa::generate_key_pair(keygen_randomness);
+    warn!("  Verification key: {} bytes", dsa::VERIFICATION_KEY_SIZE);
+    warn!("  Signing key:      {} bytes", dsa::SIGNING_KEY_SIZE);
+    warn!("  Key pair generated!");
+
+    // Step 2: Create COSE_Sign1 message
+    warn!("");
+    warn!("Step 2: Creating COSE_Sign1 message...");
+    warn!("  (Signing takes ~30 seconds)");
+    show_signature();
+    sleep(Duration::millis_at_least(300));
+
+    let payload = b"Hello from Arduino Uno Q with COSE!";
+
+    // Use static buffer to avoid stack overflow
+    let cose_output = unsafe { &mut COSE_OUTPUT };
+
+    warn!("  Calling CoseSign1::sign_mldsa65...");
+    let cose_len = match CoseSign1::sign_mldsa65(payload, &key_pair.signing_key, &rng, cose_output)
+    {
+        Ok(len) => {
+            warn!("  Payload:       \"Hello from Arduino Uno Q with COSE!\"");
+            warn!("  Payload size:  {} bytes", payload.len());
+            warn!("  COSE_Sign1:    {} bytes", len);
+            warn!("  (includes {} byte ML-DSA signature)", dsa::SIGNATURE_SIZE);
+            len
+        }
+        Err(_) => {
+            warn!("  FAILURE: COSE signing failed!");
+            show_x();
+            return RpcResult::Error(-1, "COSE sign failed");
+        }
+    };
+
+    // Step 3: Decode to verify structure (fast - no crypto verification)
+    warn!("");
+    warn!("Step 3: Verifying COSE structure...");
+    warn!("  (Signature verification skipped for speed)");
+    show_shield();
+    sleep(Duration::millis_at_least(300));
+
+    warn!("  Calling CoseSign1::decode_unverified...");
+    match CoseSign1::decode_unverified(&cose_output[..cose_len]) {
+        Ok(parts) => {
+            // Verify payload matches
+            let mut match_ok = true;
+            if parts.payload.len() != payload.len() {
+                match_ok = false;
+            } else {
+                for i in 0..payload.len() {
+                    if parts.payload[i] != payload[i] {
+                        match_ok = false;
+                        break;
+                    }
+                }
+            }
+
+            if match_ok && parts.algorithm == Some(arduino_zcbor::cose::Algorithm::MlDsa65) {
+                warn!("  COSE structure valid!");
+                warn!("  Algorithm: ML-DSA-65 (alg: -49)");
+                warn!("  Signature size: {} bytes", parts.signature.len());
+                warn!("  Payload extracted and matches original!");
+                warn!("");
+                warn!("========================================");
+                warn!("  COSE_Sign1 Demo Complete!");
+                warn!("========================================");
+                warn!("");
+                warn!("  COSE_Sign1 structure (RFC 9052):");
+                warn!("    [protected, unprotected, payload, signature]");
+                warn!("");
+                show_checkmark();
+                RpcResult::Bool(true)
+            } else {
+                warn!("  FAILURE: Payload mismatch or wrong algorithm!");
+                show_x();
+                RpcResult::Error(-3, "Payload mismatch")
+            }
+        }
+        Err(_) => {
+            warn!("  FAILURE: COSE decode failed!");
+            show_x();
+            RpcResult::Error(-2, "Decode failed")
+        }
+    }
+}
+
 /// Main entry point
 #[no_mangle]
 extern "C" fn rust_main() {
@@ -488,6 +605,7 @@ extern "C" fn rust_main() {
     warn!("║                                                              ║");
     warn!("║           ML-KEM 768 (FIPS 203)                              ║");
     warn!("║           ML-DSA 65  (FIPS 204)                              ║");
+    warn!("║           COSE_Sign1 (RFC 9052)                              ║");
     warn!("║           Hardware TRNG (STM32U585)                          ║");
     warn!("║                                                              ║");
     warn!("╚══════════════════════════════════════════════════════════════╝");
@@ -554,6 +672,7 @@ extern "C" fn rust_main() {
     server.register("pqc.run_demo", handle_pqc_demo);
     server.register("mlkem.run_demo", handle_mlkem_demo);
     server.register("mldsa.run_demo", handle_mldsa_demo);
+    server.register("cose.run_demo", handle_cose_demo);
 
     // LED matrix control
     server.register("led_matrix.clear", handle_matrix_clear);
@@ -565,6 +684,7 @@ extern "C" fn rust_main() {
     warn!("  - pqc.run_demo      -> full ML-KEM + ML-DSA demo");
     warn!("  - mlkem.run_demo    -> ML-KEM 768 demo only");
     warn!("  - mldsa.run_demo    -> ML-DSA 65 demo only");
+    warn!("  - cose.run_demo     -> COSE_Sign1 with ML-DSA demo");
     warn!("  - led_matrix.clear  -> clear LED display");
     warn!("");
     warn!("PQC RPC server ready!");
