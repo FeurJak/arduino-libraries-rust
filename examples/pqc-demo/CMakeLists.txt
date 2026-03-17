@@ -19,5 +19,9 @@ target_sources(app PRIVATE arduino-cryptography/c/hwrng.c)
 # This file is provided by arduino-cryptography library
 target_sources(app PRIVATE arduino-cryptography/c/ed25519.c)
 
+# Add X25519 implementation (for X-Wing hybrid KEM)
+# This file is provided by arduino-cryptography library
+target_sources(app PRIVATE arduino-cryptography/c/x25519.c)
+
 # Build the Rust application
 rust_cargo_application()

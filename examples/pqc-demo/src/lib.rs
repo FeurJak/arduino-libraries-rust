@@ -35,7 +35,7 @@
 
 use log::warn;
 
-use arduino_cryptography::{dsa, ed25519, kem, rng::HwRng};
+use arduino_cryptography::{dsa, ed25519, kem, rng::HwRng, x25519, xwing};
 use arduino_led_matrix::{Frame, LedMatrix};
 use arduino_rpc_bridge::{RpcResult, RpcServer, SpiTransport, Transport};
 use zephyr::time::{sleep, Duration};
@@ -584,6 +584,252 @@ fn handle_ed25519_demo(_count: usize) -> RpcResult {
     }
 }
 
+/// Run X25519 demo on-device
+/// Demonstrates: key generation, Diffie-Hellman key agreement
+fn handle_x25519_demo(_count: usize) -> RpcResult {
+    warn!("");
+    warn!("========================================");
+    warn!("  X25519 Demo (RFC 7748)");
+    warn!("  Elliptic Curve Diffie-Hellman");
+    warn!("  Using Hardware TRNG for randomness");
+    warn!("========================================");
+    warn!("");
+
+    // Initialize hardware RNG
+    let rng = HwRng::new();
+
+    // Step 1: Generate Alice's key pair
+    warn!("Step 1: Generating Alice's X25519 key pair...");
+    show_key();
+    sleep(Duration::millis_at_least(300));
+
+    let alice_seed: [u8; x25519::SECRET_KEY_SIZE] = rng.random_array();
+    let alice_sk = x25519::SecretKey::from_bytes(&alice_seed);
+    let alice_pk = alice_sk.public_key();
+
+    warn!("  Alice's public key: {} bytes", x25519::PUBLIC_KEY_SIZE);
+    let alice_pk_bytes = alice_pk.to_bytes();
+    warn!(
+        "  Prefix: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        alice_pk_bytes[0],
+        alice_pk_bytes[1],
+        alice_pk_bytes[2],
+        alice_pk_bytes[3],
+        alice_pk_bytes[4],
+        alice_pk_bytes[5],
+        alice_pk_bytes[6],
+        alice_pk_bytes[7]
+    );
+
+    // Step 2: Generate Bob's key pair
+    warn!("");
+    warn!("Step 2: Generating Bob's X25519 key pair...");
+    sleep(Duration::millis_at_least(200));
+
+    let bob_seed: [u8; x25519::SECRET_KEY_SIZE] = rng.random_array();
+    let bob_sk = x25519::SecretKey::from_bytes(&bob_seed);
+    let bob_pk = bob_sk.public_key();
+
+    warn!("  Bob's public key: {} bytes", x25519::PUBLIC_KEY_SIZE);
+    let bob_pk_bytes = bob_pk.to_bytes();
+    warn!(
+        "  Prefix: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bob_pk_bytes[0],
+        bob_pk_bytes[1],
+        bob_pk_bytes[2],
+        bob_pk_bytes[3],
+        bob_pk_bytes[4],
+        bob_pk_bytes[5],
+        bob_pk_bytes[6],
+        bob_pk_bytes[7]
+    );
+
+    // Step 3: Compute shared secrets
+    warn!("");
+    warn!("Step 3: Computing shared secrets...");
+    show_lock();
+    sleep(Duration::millis_at_least(300));
+
+    let alice_shared = match alice_sk.diffie_hellman(&bob_pk) {
+        Ok(ss) => ss,
+        Err(_) => {
+            warn!("  FAILURE: Alice's DH failed!");
+            show_x();
+            return RpcResult::Error(-1, "X25519 DH failed");
+        }
+    };
+
+    let bob_shared = match bob_sk.diffie_hellman(&alice_pk) {
+        Ok(ss) => ss,
+        Err(_) => {
+            warn!("  FAILURE: Bob's DH failed!");
+            show_x();
+            return RpcResult::Error(-2, "X25519 DH failed");
+        }
+    };
+
+    // Step 4: Verify shared secrets match
+    warn!("");
+    warn!("Step 4: Verifying shared secrets match...");
+
+    let alice_ss_bytes = alice_shared.as_bytes();
+    let bob_ss_bytes = bob_shared.as_bytes();
+
+    if alice_ss_bytes == bob_ss_bytes {
+        warn!("  Shared secret: {} bytes", x25519::SHARED_SECRET_SIZE);
+        warn!(
+            "  Prefix: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            alice_ss_bytes[0],
+            alice_ss_bytes[1],
+            alice_ss_bytes[2],
+            alice_ss_bytes[3],
+            alice_ss_bytes[4],
+            alice_ss_bytes[5],
+            alice_ss_bytes[6],
+            alice_ss_bytes[7]
+        );
+        warn!("  SUCCESS: Shared secrets match!");
+        warn!("");
+        warn!("========================================");
+        warn!("  X25519 Demo Complete!");
+        warn!("========================================");
+        show_checkmark();
+        RpcResult::Bool(true)
+    } else {
+        warn!("  FAILURE: Shared secrets don't match!");
+        show_x();
+        RpcResult::Error(-3, "Shared secrets mismatch")
+    }
+}
+
+/// Run X-Wing demo on-device
+/// Demonstrates: hybrid PQ KEM (ML-KEM-768 + X25519)
+fn handle_xwing_demo(_count: usize) -> RpcResult {
+    warn!("");
+    warn!("========================================");
+    warn!("  X-Wing Demo (Hybrid PQ KEM)");
+    warn!("  ML-KEM-768 + X25519 Hybrid");
+    warn!("  Post-Quantum Secure Key Encapsulation");
+    warn!("  Using Hardware TRNG for randomness");
+    warn!("========================================");
+    warn!("");
+
+    // Initialize hardware RNG
+    let rng = HwRng::new();
+
+    // Step 1: Generate recipient's key pair
+    warn!("Step 1: Generating X-Wing key pair...");
+    warn!("  (This combines ML-KEM-768 + X25519)");
+    show_key();
+    sleep(Duration::millis_at_least(500));
+
+    let seed: [u8; xwing::SECRET_KEY_SIZE] = rng.random_array();
+    let secret_key = xwing::SecretKey::from_seed(&seed);
+    let public_key = secret_key.public_key();
+
+    warn!("  Secret key seed: {} bytes", xwing::SECRET_KEY_SIZE);
+    warn!("  Public key:      {} bytes", xwing::PUBLIC_KEY_SIZE);
+    warn!("  Key pair generated!");
+
+    // Log first 8 bytes of public key
+    let pk_bytes = public_key.as_bytes();
+    warn!(
+        "  Public key prefix: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        pk_bytes[0],
+        pk_bytes[1],
+        pk_bytes[2],
+        pk_bytes[3],
+        pk_bytes[4],
+        pk_bytes[5],
+        pk_bytes[6],
+        pk_bytes[7]
+    );
+
+    // Step 2: Encapsulate (sender side)
+    warn!("");
+    warn!("Step 2: Encapsulating shared secret...");
+    warn!("  (Sender creates ciphertext + shared secret)");
+    show_lock();
+    sleep(Duration::millis_at_least(500));
+
+    let encaps_seed: [u8; xwing::ENCAPS_SEED_SIZE] = rng.random_array();
+    let (ciphertext, sender_shared) = xwing::encapsulate(public_key, encaps_seed);
+
+    warn!("  Ciphertext:      {} bytes", xwing::CIPHERTEXT_SIZE);
+    warn!("  Shared secret:   {} bytes", xwing::SHARED_SECRET_SIZE);
+    warn!("  Encapsulation complete!");
+
+    // Log first 8 bytes of ciphertext
+    let ct_bytes = ciphertext.as_bytes();
+    warn!(
+        "  Ciphertext prefix: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        ct_bytes[0],
+        ct_bytes[1],
+        ct_bytes[2],
+        ct_bytes[3],
+        ct_bytes[4],
+        ct_bytes[5],
+        ct_bytes[6],
+        ct_bytes[7]
+    );
+
+    // Log first 8 bytes of sender's shared secret
+    let sender_ss_bytes = sender_shared.as_bytes();
+    warn!(
+        "  Sender SS prefix:  {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        sender_ss_bytes[0],
+        sender_ss_bytes[1],
+        sender_ss_bytes[2],
+        sender_ss_bytes[3],
+        sender_ss_bytes[4],
+        sender_ss_bytes[5],
+        sender_ss_bytes[6],
+        sender_ss_bytes[7]
+    );
+
+    // Step 3: Decapsulate (receiver side)
+    warn!("");
+    warn!("Step 3: Decapsulating shared secret...");
+    warn!("  (Receiver recovers shared secret from ciphertext)");
+    show_shield();
+    sleep(Duration::millis_at_least(500));
+
+    let receiver_shared = xwing::decapsulate(&secret_key, &ciphertext);
+
+    // Log first 8 bytes of receiver's shared secret
+    let receiver_ss_bytes = receiver_shared.as_bytes();
+    warn!(
+        "  Receiver SS prefix: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        receiver_ss_bytes[0],
+        receiver_ss_bytes[1],
+        receiver_ss_bytes[2],
+        receiver_ss_bytes[3],
+        receiver_ss_bytes[4],
+        receiver_ss_bytes[5],
+        receiver_ss_bytes[6],
+        receiver_ss_bytes[7]
+    );
+
+    // Step 4: Verify shared secrets match
+    warn!("");
+    warn!("Step 4: Verifying shared secrets match...");
+
+    if sender_ss_bytes == receiver_ss_bytes {
+        warn!("  SUCCESS: Shared secrets match!");
+        warn!("");
+        warn!("========================================");
+        warn!("  X-Wing Demo Complete!");
+        warn!("  Hybrid PQ Key Encapsulation Verified!");
+        warn!("========================================");
+        show_checkmark();
+        RpcResult::Bool(true)
+    } else {
+        warn!("  FAILURE: Shared secrets don't match!");
+        show_x();
+        RpcResult::Error(-1, "X-Wing shared secrets mismatch")
+    }
+}
+
 // NOTE: COSE_Sign1 demo temporarily disabled due to ML-DSA performance issues.
 // The arduino-zcbor crate with COSE support is ready and working, but ML-DSA
 // operations currently timeout (>3 minutes). Once the ML-DSA performance
@@ -699,6 +945,8 @@ extern "C" fn rust_main() {
     server.register("mlkem.run_demo", handle_mlkem_demo);
     server.register("mldsa.run_demo", handle_mldsa_demo);
     server.register("ed25519.run_demo", handle_ed25519_demo);
+    server.register("x25519.run_demo", handle_x25519_demo);
+    server.register("xwing.run_demo", handle_xwing_demo);
     // NOTE: cose.run_demo disabled due to ML-DSA performance issues
 
     // LED matrix control
@@ -712,6 +960,8 @@ extern "C" fn rust_main() {
     warn!("  - mlkem.run_demo    -> ML-KEM 768 demo only");
     warn!("  - mldsa.run_demo    -> ML-DSA 65 demo only (WARNING: slow)");
     warn!("  - ed25519.run_demo  -> Ed25519 demo (fast!)");
+    warn!("  - x25519.run_demo   -> X25519 ECDH demo (fast!)");
+    warn!("  - xwing.run_demo    -> X-Wing hybrid PQ KEM demo");
     warn!("  - led_matrix.clear  -> clear LED display");
     warn!("");
     warn!("NOTE: ML-DSA operations have a known performance issue");

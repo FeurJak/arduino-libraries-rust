@@ -41,5 +41,9 @@ mldsa44 = ["libcrux-iot-ml-dsa/mldsa44"]
 mldsa65 = ["libcrux-iot-ml-dsa/mldsa65"]
 mldsa87 = ["libcrux-iot-ml-dsa/mldsa87"]
 
-# Classical cryptography (via mbedTLS PSA Crypto)
+# Classical cryptography (via standalone C implementations)
 ed25519 = []
+x25519 = []
+
+# Hybrid post-quantum key encapsulation
+xwing = ["x25519", "mlkem768"]

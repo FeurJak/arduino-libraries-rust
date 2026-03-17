@@ -66,6 +66,14 @@ struct Args {
     #[arg(long)]
     ed25519_demo: bool,
 
+    /// Run the MCU-side X25519 ECDH demo (fast key exchange)
+    #[arg(long)]
+    x25519_demo: bool,
+
+    /// Run the MCU-side X-Wing hybrid PQ KEM demo (ML-KEM + X25519)
+    #[arg(long)]
+    xwing_demo: bool,
+
     /// Just ping the MCU
     #[arg(short, long)]
     ping: bool,
@@ -381,6 +389,56 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if args.x25519_demo {
+        info!("");
+        info!("Running X25519 ECDH demo on MCU...");
+        info!("Watch the LED matrix for status indicators!");
+        info!("");
+        match client.call_timeout("x25519.run_demo", vec![], demo_timeout) {
+            Ok(result) => {
+                info!("X25519 demo completed: {:?}", result);
+                info!("");
+                info!("The MCU successfully:");
+                info!("  - Generated two X25519 key pairs (Alice & Bob)");
+                info!("  - Performed ECDH key agreement");
+                info!("  - Verified both parties derived the same shared secret");
+            }
+            Err(e) => {
+                error!("X25519 demo failed: {}", e);
+                return Err(e.into());
+            }
+        }
+        return Ok(());
+    }
+
+    if args.xwing_demo {
+        info!("");
+        info!("Running X-Wing hybrid PQ KEM demo on MCU...");
+        info!("X-Wing combines ML-KEM-768 + X25519 for hybrid post-quantum security");
+        info!("Watch the LED matrix for status indicators!");
+        info!("");
+        match client.call_timeout("xwing.run_demo", vec![], demo_timeout) {
+            Ok(result) => {
+                info!("X-Wing demo completed: {:?}", result);
+                info!("");
+                info!("The MCU successfully:");
+                info!("  - Generated X-Wing key pair (ML-KEM-768 + X25519)");
+                info!("  - Encapsulated a hybrid shared secret");
+                info!("  - Decapsulated and verified shared secret match");
+                info!("");
+                info!("X-Wing provides:");
+                info!("  - Post-quantum security via ML-KEM-768");
+                info!("  - Classical security via X25519");
+                info!("  - IND-CCA2 security if either component is secure");
+            }
+            Err(e) => {
+                error!("X-Wing demo failed: {}", e);
+                return Err(e.into());
+            }
+        }
+        return Ok(());
+    }
+
     if args.demo {
         return run_demo(&client, &args.message);
     }
@@ -393,6 +451,8 @@ fn main() -> Result<()> {
     info!("  pqc-client --mlkem-demo         Run ML-KEM 768 demo on MCU");
     info!("  pqc-client --mldsa-demo         Run ML-DSA 65 demo on MCU (slow!)");
     info!("  pqc-client --ed25519-demo       Run Ed25519 demo on MCU (fast!)");
+    info!("  pqc-client --x25519-demo        Run X25519 ECDH demo on MCU (fast!)");
+    info!("  pqc-client --xwing-demo         Run X-Wing hybrid PQ KEM demo on MCU");
     info!("  pqc-client --cose-demo          Run COSE_Sign1 demo on MCU");
     info!("  pqc-client --demo               Run local simulation demo");
     info!("  pqc-client --demo -m \"msg\"      Demo with custom message");

@@ -87,14 +87,18 @@ Linux-side RPC client library for calling MCU methods.
 
 ### arduino-cryptography (MCU)
 
-Post-quantum cryptography library for the MCU, providing ML-KEM (FIPS 203) key encapsulation and ML-DSA (FIPS 204) digital signatures.
+Comprehensive cryptography library for the MCU, providing both post-quantum and classical cryptographic primitives.
 
 **Features:**
 
-- ML-KEM 768 (NIST Level 3 security) - Key encapsulation
-- ML-DSA 65 (NIST Level 3 security) - Digital signatures
-- Formally verified implementation via [libcrux-iot](https://github.com/cryspen/libcrux-iot)
-- Quantum-resistant cryptography
+- **ML-KEM 768** (FIPS 203) - Post-quantum key encapsulation
+- **ML-DSA 65** (FIPS 204) - Post-quantum digital signatures
+- **X-Wing** (draft-connolly-cfrg-xwing-kem) - Hybrid PQ/classical KEM combining ML-KEM-768 + X25519
+- **X25519** - Classical elliptic curve Diffie-Hellman key exchange
+- **Ed25519** - Classical elliptic curve digital signatures
+- **COSE_Sign1** (RFC 9052) - CBOR Object Signing with ML-DSA
+- **Hardware RNG** - True Random Number Generator integration via Zephyr
+- Formally verified PQ implementations via [libcrux-iot](https://github.com/cryspen/libcrux-iot)
 - no_std compatible
 
 ## Examples
@@ -121,7 +125,16 @@ Post-quantum key exchange demonstration using ML-KEM 768 between MCU and Linux.
 
 ### pqc-demo (MCU) + pqc-client (Linux)
 
-Complete post-quantum cryptography demonstration combining ML-KEM 768 (key encapsulation) and ML-DSA 65 (digital signatures). Runs entirely on the MCU with LED matrix visual feedback.
+Complete cryptography demonstration showcasing both post-quantum and classical algorithms:
+
+- **ML-KEM 768** - Post-quantum key encapsulation (~2 seconds)
+- **ML-DSA 65** - Post-quantum digital signatures (~60+ seconds)
+- **X-Wing** - Hybrid PQ KEM combining ML-KEM-768 + X25519 (~2 seconds)
+- **X25519** - Classical ECDH key exchange (~1 second)
+- **Ed25519** - Classical digital signatures (~1 second)
+- **COSE_Sign1** - RFC 9052 signing with ML-DSA (~90 seconds)
+
+All demos run entirely on the MCU with LED matrix visual feedback.
 
 ## Requirements
 
@@ -210,15 +223,28 @@ make flash APP=pqc-demo
 make build-linux APP=pqc-client
 make deploy-linux APP=pqc-client
 
-# 3. Run the ML-KEM demo (recommended - fast, ~2 seconds)
-make pqc-demo
+# 3. Run demos (via adb shell or make targets)
 
-# Or ping the MCU
+# Ping the MCU
 make pqc-ping
 
-# Or run with custom arguments
+# Run ML-KEM demo (fast, ~2 seconds)
 make pqc CMD='--mlkem-demo'
-make pqc CMD='--mldsa-demo'   # Note: ML-DSA is slow (>60s)
+
+# Run X-Wing hybrid PQ KEM demo (fast, ~2 seconds)
+make pqc CMD='--xwing-demo'
+
+# Run X25519 ECDH demo (fast, ~1 second)
+make pqc CMD='--x25519-demo'
+
+# Run Ed25519 signature demo (fast, ~1 second)
+make pqc CMD='--ed25519-demo'
+
+# Run ML-DSA demo (slow, >60 seconds)
+make pqc CMD='--mldsa-demo'
+
+# Run COSE_Sign1 demo (slow, ~90 seconds)
+make pqc CMD='--cose-demo'
 ```
 
 **LED Matrix Indicators:**

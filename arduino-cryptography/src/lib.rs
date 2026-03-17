@@ -28,12 +28,25 @@ pub use libcrux_secrets;
 /// See the module documentation for setup requirements.
 pub mod rng;
 
-/// Ed25519 digital signatures (RFC 8032) using PSA Crypto API.
+/// Ed25519 digital signatures (RFC 8032) using standalone C implementation.
 ///
-/// Requires mbedTLS with PSA Crypto and Ed25519 support enabled in Zephyr.
-/// See the module documentation for Kconfig requirements.
+/// See the module documentation for setup requirements.
 #[cfg(feature = "ed25519")]
 pub mod ed25519;
+
+/// X25519 key agreement (RFC 7748) using standalone C implementation.
+///
+/// Provides Elliptic Curve Diffie-Hellman using Curve25519.
+/// See the module documentation for setup requirements.
+#[cfg(feature = "x25519")]
+pub mod x25519;
+
+/// X-Wing hybrid post-quantum KEM (ML-KEM-768 + X25519).
+///
+/// Provides hybrid key encapsulation combining classical and post-quantum security.
+/// See the module documentation for setup requirements.
+#[cfg(feature = "xwing")]
+pub mod xwing;
 
 /// Re-export ML-KEM types and functions
 pub mod mlkem {
