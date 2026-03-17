@@ -1,6 +1,6 @@
 # Arduino Cryptography Library
 
-Comprehensive cryptographic primitives for the Arduino Uno Q (STM32U585 MCU), providing both post-quantum and classical algorithms.
+Comprehensive cryptographic primitives for the Arduino Uno Q (STM32U585 MCU), providing post-quantum, classical, anonymous credential, and secure storage algorithms.
 
 ## Features
 
@@ -14,6 +14,13 @@ Comprehensive cryptographic primitives for the Arduino Uno Q (STM32U585 MCU), pr
 
 - **SAGA** - BBS-style MAC scheme for anonymous credentials with unlinkable presentations
 - **SAGA + X-Wing** - Credential-protected post-quantum key exchange combining anonymous authentication with hybrid PQ key encapsulation
+
+### Secure Storage (PSA Certified API)
+
+- **PSA ITS** (Internal Trusted Storage) - Store arbitrary encrypted data persistently
+- **PSA Crypto Key Management** - Generate, import, export, and manage cryptographic keys
+- Data encrypted at rest using AEAD with device-unique key
+- Persistent storage that survives device reboots
 
 ### Classical Cryptography
 
@@ -257,6 +264,68 @@ let (device_keys, decrypted) = saga_xwing::CredentialKeyExchange::complete(
 assert_eq!(server_keys.shared_secret.as_bytes(), device_keys.shared_secret.as_bytes());
 ```
 
+### PSA Secure Storage Example
+
+```rust
+use arduino_cryptography::psa::{self, its, crypto};
+use arduino_cryptography::psa::{StorageUid, StorageFlags, KeyAttributes, KeyType, Algorithm, KeyUsageFlags};
+
+// Initialize PSA Crypto (required once at startup)
+crypto::init()?;
+
+// === Internal Trusted Storage (ITS) ===
+// Store arbitrary encrypted data that persists across reboots
+
+let uid: StorageUid = 0x0000_1000;  // Application-defined UID
+let secret_data = b"my-secret-credential-key";
+
+// Store data (encrypted at rest)
+its::set(uid, secret_data, StorageFlags::NONE)?;
+
+// Retrieve data
+let mut buffer = [0u8; 64];
+let len = its::get(uid, 0, &mut buffer)?;
+assert_eq!(&buffer[..len], secret_data);
+
+// Check if entry exists
+if its::exists(uid) {
+    let info = its::get_info(uid)?;
+    println!("Entry size: {} bytes", info.size);
+}
+
+// Remove entry
+its::remove(uid)?;
+
+// === PSA Crypto Key Management ===
+// Generate and manage cryptographic keys
+
+let key_id: psa::KeyId = 0x0001_0001;  // Application-defined key ID
+
+// Generate a persistent AES-256 key
+let attrs = KeyAttributes::new()
+    .with_type(KeyType::Aes)
+    .with_bits(256)
+    .with_algorithm(Algorithm::AesGcm)
+    .with_usage(KeyUsageFlags::ENCRYPT | KeyUsageFlags::DECRYPT | KeyUsageFlags::EXPORT)
+    .persistent(key_id);
+
+let generated_id = crypto::generate_key(&attrs)?;
+
+// Export key material (if permitted)
+let mut key_buffer = [0u8; 32];
+let key_len = crypto::export_key(generated_id, &mut key_buffer)?;
+
+// Get key attributes
+let read_attrs = crypto::get_key_attributes(generated_id)?;
+println!("Key bits: {}, lifetime: {:?}", read_attrs.bits, read_attrs.lifetime);
+
+// Destroy key when done
+crypto::destroy_key(generated_id)?;
+
+// Convenience function for common case
+let key_id = crypto::generate_aes256_key(0x0001_0002)?;
+```
+
 ## Hardware RNG Setup
 
 The `HwRng` module requires some setup in your Zephyr project:
@@ -400,6 +469,7 @@ arduino-cryptography = { path = "../../arduino-cryptography", features = ["mlkem
 | `xchacha20poly1305` | XChaCha20-Poly1305 AEAD       | mbedTLS, rng                      |
 | `saga`              | SAGA anonymous credentials    | curve25519-dalek, sha2, rng       |
 | `saga_xwing`        | SAGA + X-Wing hybrid protocol | saga, xwing, xchacha20poly1305    |
+| `psa`               | PSA Secure Storage + Crypto   | Zephyr Secure Storage, mbedTLS    |
 | `cose`              | COSE_Sign1 (RFC 9052)         | mldsa                             |
 | `rng`               | Hardware RNG support          | Zephyr entropy API                |
 
@@ -416,6 +486,9 @@ target_sources(app PRIVATE ${CMAKE_SOURCE_DIR}/../../arduino-cryptography/c/ed25
 
 # Add XChaCha20-Poly1305 implementation (requires mbedTLS)
 target_sources(app PRIVATE ${CMAKE_SOURCE_DIR}/../../arduino-cryptography/c/xchacha20poly1305.c)
+
+# Add PSA Secure Storage wrapper (requires Zephyr Secure Storage)
+target_sources(app PRIVATE ${CMAKE_SOURCE_DIR}/../../arduino-cryptography/c/psa_wrapper.c)
 
 # Add hardware RNG wrapper
 target_sources(app PRIVATE ${CMAKE_SOURCE_DIR}/../../arduino-cryptography/c/hwrng.c)
@@ -434,6 +507,44 @@ CONFIG_MBEDTLS_CHACHAPOLY_AEAD_ENABLED=y
 CONFIG_MBEDTLS_HASH_ALL_ENABLED=y
 CONFIG_MBEDTLS_ENABLE_HEAP=y
 CONFIG_MBEDTLS_HEAP_SIZE=8192
+```
+
+For PSA Secure Storage, add these additional settings:
+
+```
+# PSA Crypto API
+CONFIG_MBEDTLS_PSA_CRYPTO_C=y
+
+# Zephyr Secure Storage subsystem
+CONFIG_SECURE_STORAGE=y
+CONFIG_SECURE_STORAGE_ITS_IMPLEMENTATION_ZEPHYR=y
+CONFIG_SECURE_STORAGE_ITS_STORE_IMPLEMENTATION_SETTINGS=y
+CONFIG_SECURE_STORAGE_ITS_TRANSFORM_IMPLEMENTATION_AEAD=y
+CONFIG_SECURE_STORAGE_ITS_MAX_DATA_SIZE=512
+
+# Storage backends
+CONFIG_SETTINGS=y
+CONFIG_SETTINGS_NVS=y
+CONFIG_NVS=y
+CONFIG_FLASH=y
+CONFIG_FLASH_MAP=y
+```
+
+And add an ITS partition to your board overlay (`.overlay` file):
+
+```dts
+&flash0 {
+    partitions {
+        compatible = "fixed-partitions";
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        its_partition: partition@e0000 {
+            label = "its_storage";
+            reg = <0x000e0000 DT_SIZE_K(64)>;
+        };
+    };
+};
 ```
 
 ## Dependencies

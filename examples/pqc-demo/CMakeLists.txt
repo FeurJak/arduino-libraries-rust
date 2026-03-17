@@ -27,5 +27,9 @@ target_sources(app PRIVATE arduino-cryptography/c/x25519.c)
 # This file is provided by arduino-cryptography library
 target_sources(app PRIVATE arduino-cryptography/c/xchacha20poly1305.c)
 
+# Add PSA Secure Storage wrapper for Rust FFI
+# Provides ITS (Internal Trusted Storage) and Crypto key management
+target_sources(app PRIVATE arduino-cryptography/c/psa_wrapper.c)
+
 # Build the Rust application
 rust_cargo_application()

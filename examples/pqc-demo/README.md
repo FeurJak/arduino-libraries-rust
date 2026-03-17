@@ -1,6 +1,6 @@
 # PQC Demo - Cryptography Showcase for Arduino Uno Q
 
-This example demonstrates comprehensive cryptographic operations running entirely on the Arduino Uno Q's STM32U585 MCU, including post-quantum algorithms (ML-KEM, ML-DSA, X-Wing) and classical algorithms (X25519, Ed25519).
+This example demonstrates comprehensive cryptographic operations running entirely on the Arduino Uno Q's STM32U585 MCU, including post-quantum algorithms (ML-KEM, ML-DSA, X-Wing), classical algorithms (X25519, Ed25519), anonymous credentials (SAGA), and secure storage (PSA).
 
 ## Features
 
@@ -12,6 +12,11 @@ This example demonstrates comprehensive cryptographic operations running entirel
 ### Anonymous Credentials
 - **SAGA**: BBS-style MAC scheme for anonymous credentials with unlinkable presentations
 - **SAGA + X-Wing**: Credential-protected post-quantum key exchange
+
+### Secure Storage (PSA Certified API)
+- **PSA ITS**: Internal Trusted Storage for encrypted persistent data
+- **PSA Crypto**: Key generation, import, export, and management
+- Data encrypted at rest with device-unique key
 
 ### Classical Cryptography
 - **X25519**: Elliptic curve Diffie-Hellman key exchange
@@ -33,40 +38,57 @@ This example demonstrates comprehensive cryptographic operations running entirel
 
 # 1. Build and flash the PQC demo firmware
 make build APP=pqc-demo
-make flash APP=pqc-demo
+make flash
 
 # 2. Build and deploy the Linux client (one-time)
 make build-linux APP=pqc-client
 make deploy-linux APP=pqc-client
 
-# 3. Run the demo!
-make pqc-demo
+# 3. Run a demo!
+make demo DEMO=psa
 ```
 
 ## Available Commands
 
 ```bash
-# Ping the MCU
-make pqc-ping
+# List all available demos
+make demo-list
+
+# Test connection
+make ping
+make version
+
+# Open serial console to see detailed output (in another terminal)
+make serial
 
 # Fast demos (< 5 seconds)
-make pqc CMD='--mlkem-demo'        # ML-KEM 768 key encapsulation
-make pqc CMD='--xwing-demo'        # X-Wing hybrid PQ KEM (ML-KEM + X25519)
-make pqc CMD='--xchacha20-demo'    # XChaCha20-Poly1305 AEAD
-make pqc CMD='--x25519-demo'       # X25519 ECDH key exchange
-make pqc CMD='--ed25519-demo'      # Ed25519 digital signatures
-make pqc CMD='--saga-demo'         # SAGA anonymous credentials
-make pqc CMD='--saga-xwing-demo'   # SAGA + X-Wing credential key exchange
+make demo DEMO=psa              # PSA Secure Storage + Key Management
+make demo DEMO=mlkem            # ML-KEM 768 key encapsulation
+make demo DEMO=xwing            # X-Wing hybrid PQ KEM (ML-KEM + X25519)
+make demo DEMO=xchacha20        # XChaCha20-Poly1305 AEAD
+make demo DEMO=x25519           # X25519 ECDH key exchange
+make demo DEMO=ed25519          # Ed25519 digital signatures
+make demo DEMO=saga             # SAGA anonymous credentials
+make demo DEMO=saga-xwing       # SAGA + X-Wing credential key exchange
 
 # Slow demos (60+ seconds)
-make pqc CMD='--mldsa-demo'        # ML-DSA 65 signatures
-make pqc CMD='--cose-demo'         # COSE_Sign1 with ML-DSA
-
-# Show all options
-make pqc CMD='--help'
+make demo DEMO=mldsa            # ML-DSA 65 signatures
 ```
 
 ## What the Demos Do
+
+### PSA Secure Storage Demo (~2 seconds)
+
+1. **Initialize**: Initializes PSA Crypto subsystem
+2. **Store Data**: Stores secret data in ITS (encrypted at rest)
+3. **Retrieve Data**: Reads back and verifies the encrypted data
+4. **Get Info**: Retrieves metadata about stored entry
+5. **Generate Key**: Creates a persistent AES-256 key
+6. **Export Key**: Exports the key material to verify generation
+7. **Get Attributes**: Reads key attributes (type, bits, lifetime)
+8. **Cleanup**: Removes demo entries and destroys key
+
+PSA Secure Storage provides encrypted persistent storage that survives device reboots, using AEAD encryption with a device-unique key.
 
 ### ML-KEM Demo (~2 seconds)
 
@@ -160,6 +182,7 @@ Note: ML-DSA operations are computationally intensive on Cortex-M33.
 ## RPC Methods
 
 ### Demo Methods (Self-Contained)
+- `psa.run_demo` - PSA Secure Storage + Key Management demo
 - `pqc.run_demo` - Full ML-KEM + ML-DSA demo
 - `mlkem.run_demo` - ML-KEM 768 demo only
 - `mldsa.run_demo` - ML-DSA 65 demo only
@@ -263,7 +286,7 @@ Note: ML-DSA operations are computationally intensive on Cortex-M33.
 
 - Stack: 96KB (configured in prj.conf, increased for SAGA + X-Wing)
 - Heap: 32KB
-- Flash: ~311KB (with all crypto algorithms enabled including SAGA + X-Wing)
+- Flash: ~350KB (with all crypto algorithms enabled including PSA, SAGA + X-Wing)
 
 Note: The SAGA + X-Wing demo requires extra stack space (~96KB) because the protocol holds multiple large crypto structures simultaneously (X-Wing secret key ~3.6KB, public keys ~1.2KB each, ciphertext ~1.1KB).
 
@@ -329,16 +352,16 @@ The Linux client (`pqc-client`) supports these commands:
 
 ```
 pqc-client --ping               Test connection to MCU
-pqc-client --mcu-demo           Run full PQC demo (ML-KEM + ML-DSA)
+pqc-client --psa-demo           Run PSA Secure Storage demo
 pqc-client --mlkem-demo         Run ML-KEM 768 demo
-pqc-client --mldsa-demo         Run ML-DSA 65 demo (slow!)
 pqc-client --xwing-demo         Run X-Wing hybrid PQ KEM demo
-pqc-client --xchacha20-demo     Run XChaCha20-Poly1305 AEAD demo
-pqc-client --x25519-demo        Run X25519 ECDH demo
-pqc-client --ed25519-demo       Run Ed25519 signature demo
 pqc-client --saga-demo          Run SAGA anonymous credentials demo
 pqc-client --saga-xwing-demo    Run SAGA + X-Wing credential key exchange
-pqc-client --cose-demo          Run COSE_Sign1 demo
+pqc-client --ed25519-demo       Run Ed25519 signature demo
+pqc-client --x25519-demo        Run X25519 ECDH demo
+pqc-client --xchacha20-demo     Run XChaCha20-Poly1305 AEAD demo
+pqc-client --mcu-demo           Run full PQC demo (ML-KEM + ML-DSA)
+pqc-client --mldsa-demo         Run ML-DSA 65 demo (slow!)
 pqc-client --demo               Run local simulation demo
 pqc-client --help               Show all options
 ```

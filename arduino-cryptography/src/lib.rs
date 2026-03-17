@@ -81,6 +81,19 @@ pub mod saga;
 #[cfg(feature = "saga_xwing")]
 pub mod saga_xwing;
 
+/// PSA Secure Storage and Crypto Key Management.
+///
+/// Provides:
+/// - [`psa::its`] - Internal Trusted Storage for encrypted data
+/// - [`psa::crypto`] - Key generation, import, export, destruction
+///
+/// Data is encrypted at rest using AEAD with a device-unique key.
+/// Supports persistent storage that survives device reboots.
+///
+/// See the module documentation for setup requirements.
+#[cfg(feature = "psa")]
+pub mod psa;
+
 /// Re-export ML-KEM types and functions
 pub mod mlkem {
     #[cfg(feature = "mlkem512")]

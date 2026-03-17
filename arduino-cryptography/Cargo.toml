@@ -69,3 +69,9 @@ saga_xwing = ["saga", "xwing", "xchacha20poly1305"]
 
 # Hardware RNG (always needed for secure crypto)
 rng = []
+
+# PSA Secure Storage and Crypto Key Management
+# Provides:
+# - psa::its - Internal Trusted Storage for encrypted data
+# - psa::crypto - Key generation, import, export, destruction
+psa = []

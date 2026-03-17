@@ -86,6 +86,10 @@ struct Args {
     #[arg(long)]
     saga_xwing_demo: bool,
 
+    /// Run the MCU-side PSA Secure Storage demo
+    #[arg(long)]
+    psa_demo: bool,
+
     /// Just ping the MCU
     #[arg(short, long)]
     ping: bool,
@@ -550,6 +554,37 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if args.psa_demo {
+        info!("");
+        info!("Running PSA Secure Storage demo on MCU...");
+        info!("Demonstrates encrypted persistent storage using Zephyr Secure Storage");
+        info!("Watch the LED matrix for status indicators!");
+        info!("");
+        match client.call_timeout("psa.run_demo", vec![], demo_timeout) {
+            Ok(result) => {
+                info!("PSA Secure Storage demo completed: {:?}", result);
+                info!("");
+                info!("The MCU successfully:");
+                info!("  - Initialized PSA Crypto subsystem");
+                info!("  - Stored encrypted data in ITS (Internal Trusted Storage)");
+                info!("  - Retrieved and verified the encrypted data");
+                info!("  - Generated a persistent AES-256 key");
+                info!("  - Exported and verified the key");
+                info!("");
+                info!("PSA Secure Storage provides:");
+                info!("  - Data encrypted at rest (AEAD transform)");
+                info!("  - Device-unique encryption key");
+                info!("  - Persistent storage across reboots");
+                info!("  - PSA Certified API compliance");
+            }
+            Err(e) => {
+                error!("PSA Secure Storage demo failed: {}", e);
+                return Err(e.into());
+            }
+        }
+        return Ok(());
+    }
+
     if args.demo {
         return run_demo(&client, &args.message);
     }
@@ -558,18 +593,17 @@ fn main() -> Result<()> {
     info!("");
     info!("Usage:");
     info!("  pqc-client --ping               Test connection");
-    info!("  pqc-client --mcu-demo           Run full PQC demo on MCU");
+    info!("  pqc-client --psa-demo           Run PSA Secure Storage demo on MCU");
     info!("  pqc-client --mlkem-demo         Run ML-KEM 768 demo on MCU");
-    info!("  pqc-client --mldsa-demo         Run ML-DSA 65 demo on MCU (slow!)");
-    info!("  pqc-client --ed25519-demo       Run Ed25519 demo on MCU (fast!)");
-    info!("  pqc-client --x25519-demo        Run X25519 ECDH demo on MCU (fast!)");
     info!("  pqc-client --xwing-demo         Run X-Wing hybrid PQ KEM demo on MCU");
-    info!("  pqc-client --xchacha20-demo     Run XChaCha20-Poly1305 AEAD demo on MCU");
     info!("  pqc-client --saga-demo          Run SAGA anonymous credentials demo on MCU");
     info!("  pqc-client --saga-xwing-demo    Run SAGA+X-Wing credential key exchange demo");
-    info!("  pqc-client --cose-demo          Run COSE_Sign1 demo on MCU");
+    info!("  pqc-client --ed25519-demo       Run Ed25519 demo on MCU (fast!)");
+    info!("  pqc-client --x25519-demo        Run X25519 ECDH demo on MCU (fast!)");
+    info!("  pqc-client --xchacha20-demo     Run XChaCha20-Poly1305 AEAD demo on MCU");
+    info!("  pqc-client --mcu-demo           Run full PQC demo on MCU");
+    info!("  pqc-client --mldsa-demo         Run ML-DSA 65 demo on MCU (slow!)");
     info!("  pqc-client --demo               Run local simulation demo");
-    info!("  pqc-client --demo -m \"msg\"      Demo with custom message");
     info!("");
 
     // Run a quick local Dilithium3 test

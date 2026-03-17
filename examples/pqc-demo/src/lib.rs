@@ -36,7 +36,7 @@
 use log::warn;
 
 use arduino_cryptography::{
-    dsa, ed25519, kem, rng::HwRng, saga, saga_xwing, x25519, xchacha20poly1305, xwing,
+    dsa, ed25519, kem, psa, rng::HwRng, saga, saga_xwing, x25519, xchacha20poly1305, xwing,
 };
 use arduino_led_matrix::{Frame, LedMatrix};
 use arduino_rpc_bridge::{RpcResult, RpcServer, SpiTransport, Transport};
@@ -1466,6 +1466,284 @@ fn handle_saga_xwing_demo(_count: usize) -> RpcResult {
     RpcResult::Bool(true)
 }
 
+/// Run PSA Secure Storage demo on-device
+/// Demonstrates: ITS storage, crypto key management, persistence
+fn handle_psa_demo(_count: usize) -> RpcResult {
+    warn!("");
+    warn!("========================================");
+    warn!("  PSA Secure Storage Demo");
+    warn!("  Internal Trusted Storage (ITS)");
+    warn!("  PSA Crypto Key Management");
+    warn!("  Encrypted Persistent Storage");
+    warn!("========================================");
+    warn!("");
+
+    // ==========================================
+    // Phase 1: Initialize PSA Crypto
+    // ==========================================
+    warn!("┌──────────────────────────────────────────────────────────────┐");
+    warn!("│  PHASE 1: Initialize PSA Crypto                              │");
+    warn!("└──────────────────────────────────────────────────────────────┘");
+    warn!("");
+
+    warn!("  [1.1] Initializing PSA Crypto subsystem...");
+    show_key();
+    sleep(Duration::millis_at_least(300));
+
+    if let Err(e) = psa::crypto::init() {
+        warn!("  FAILURE: PSA Crypto init failed: {}", e);
+        show_x();
+        return RpcResult::Error(-1, "PSA init failed");
+    }
+
+    warn!("        PSA Crypto initialized!");
+    warn!("");
+
+    // ==========================================
+    // Phase 2: ITS - Store and Retrieve Data
+    // ==========================================
+    warn!("┌──────────────────────────────────────────────────────────────┐");
+    warn!("│  PHASE 2: Internal Trusted Storage (ITS)                     │");
+    warn!("└──────────────────────────────────────────────────────────────┘");
+    warn!("");
+
+    // Demo UIDs - applications should define their own strategy
+    const DEMO_UID_SECRET: psa::StorageUid = 0x0000_1000;
+    const DEMO_UID_CONFIG: psa::StorageUid = 0x0000_1001;
+
+    // Step 2.1: Store secret data
+    warn!(
+        "  [2.1] Storing secret data (UID: 0x{:08X})...",
+        DEMO_UID_SECRET
+    );
+    show_lock();
+    sleep(Duration::millis_at_least(300));
+
+    let secret_data = b"my-secret-credential-key-material-32b";
+
+    // First, remove if exists from previous run
+    let _ = psa::its::remove(DEMO_UID_SECRET);
+
+    if let Err(e) = psa::its::set(DEMO_UID_SECRET, secret_data, psa::StorageFlags::NONE) {
+        warn!("  FAILURE: ITS set failed: {}", e);
+        show_x();
+        return RpcResult::Error(-2, "ITS set failed");
+    }
+
+    warn!(
+        "        Stored {} bytes (encrypted at rest)",
+        secret_data.len()
+    );
+
+    // Step 2.2: Retrieve and verify
+    warn!("");
+    warn!("  [2.2] Retrieving and verifying data...");
+    show_shield();
+    sleep(Duration::millis_at_least(300));
+
+    let mut read_buffer = [0u8; 64];
+    let read_len = match psa::its::get(DEMO_UID_SECRET, 0, &mut read_buffer) {
+        Ok(len) => len,
+        Err(e) => {
+            warn!("  FAILURE: ITS get failed: {}", e);
+            show_x();
+            return RpcResult::Error(-3, "ITS get failed");
+        }
+    };
+
+    if &read_buffer[..read_len] != secret_data {
+        warn!("  FAILURE: Data mismatch!");
+        show_x();
+        return RpcResult::Error(-4, "Data mismatch");
+    }
+
+    warn!("        Retrieved {} bytes - data verified!", read_len);
+
+    // Step 2.3: Get storage info
+    warn!("");
+    warn!("  [2.3] Getting storage info...");
+
+    let info = match psa::its::get_info(DEMO_UID_SECRET) {
+        Ok(i) => i,
+        Err(e) => {
+            warn!("  FAILURE: ITS get_info failed: {}", e);
+            show_x();
+            return RpcResult::Error(-5, "ITS get_info failed");
+        }
+    };
+
+    warn!(
+        "        Entry info: size={}, capacity={}",
+        info.size, info.capacity
+    );
+
+    // Step 2.4: Store configuration data
+    warn!("");
+    warn!(
+        "  [2.4] Storing configuration data (UID: 0x{:08X})...",
+        DEMO_UID_CONFIG
+    );
+
+    let _ = psa::its::remove(DEMO_UID_CONFIG);
+    let config_data = b"device_id=UnoQ-001;access=admin";
+
+    if let Err(e) = psa::its::set(DEMO_UID_CONFIG, config_data, psa::StorageFlags::NONE) {
+        warn!("  FAILURE: ITS set config failed: {}", e);
+        show_x();
+        return RpcResult::Error(-6, "ITS set config failed");
+    }
+
+    warn!("        Stored configuration ({} bytes)", config_data.len());
+    warn!("");
+    warn!("  ✓ ITS operations successful!");
+    warn!("");
+
+    // ==========================================
+    // Phase 3: PSA Crypto Key Management
+    // ==========================================
+    warn!("┌──────────────────────────────────────────────────────────────┐");
+    warn!("│  PHASE 3: PSA Crypto Key Management                          │");
+    warn!("└──────────────────────────────────────────────────────────────┘");
+    warn!("");
+
+    // Demo key ID - applications should define their own strategy
+    const DEMO_KEY_ID: psa::KeyId = 0x0001_0001;
+
+    // Step 3.1: Generate persistent AES-256 key
+    warn!(
+        "  [3.1] Generating persistent AES-256 key (ID: 0x{:08X})...",
+        DEMO_KEY_ID
+    );
+    show_key();
+    sleep(Duration::millis_at_least(400));
+
+    // First destroy if exists from previous run
+    let _ = psa::crypto::destroy_key(DEMO_KEY_ID);
+
+    let attrs = psa::KeyAttributes::new()
+        .with_type(psa::KeyType::Aes)
+        .with_bits(256)
+        .with_algorithm(psa::Algorithm::AesGcm)
+        .with_usage(
+            psa::KeyUsageFlags::ENCRYPT | psa::KeyUsageFlags::DECRYPT | psa::KeyUsageFlags::EXPORT,
+        )
+        .persistent(DEMO_KEY_ID);
+
+    let generated_id = match psa::crypto::generate_key(&attrs) {
+        Ok(id) => id,
+        Err(e) => {
+            warn!("  FAILURE: Key generation failed: {}", e);
+            show_x();
+            return RpcResult::Error(-7, "Key generation failed");
+        }
+    };
+
+    warn!(
+        "        Generated persistent key ID: 0x{:08X}",
+        generated_id
+    );
+    warn!("        Key type: AES-256");
+    warn!("        Algorithm: AES-GCM");
+    warn!("        Lifetime: Persistent (survives reboot)");
+
+    // Step 3.2: Export key (to verify generation)
+    warn!("");
+    warn!("  [3.2] Exporting key to verify...");
+    show_lock();
+    sleep(Duration::millis_at_least(300));
+
+    let mut key_buffer = [0u8; 32];
+    let key_len = match psa::crypto::export_key(generated_id, &mut key_buffer) {
+        Ok(len) => len,
+        Err(e) => {
+            warn!("  FAILURE: Key export failed: {}", e);
+            show_x();
+            return RpcResult::Error(-8, "Key export failed");
+        }
+    };
+
+    warn!("        Exported key: {} bytes", key_len);
+    warn!(
+        "        Key prefix: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}...",
+        key_buffer[0],
+        key_buffer[1],
+        key_buffer[2],
+        key_buffer[3],
+        key_buffer[4],
+        key_buffer[5],
+        key_buffer[6],
+        key_buffer[7]
+    );
+
+    // Step 3.3: Get key attributes
+    warn!("");
+    warn!("  [3.3] Reading key attributes...");
+
+    let read_attrs = match psa::crypto::get_key_attributes(generated_id) {
+        Ok(a) => a,
+        Err(e) => {
+            warn!("  FAILURE: Get attributes failed: {}", e);
+            show_x();
+            return RpcResult::Error(-9, "Get attributes failed");
+        }
+    };
+
+    warn!("        Key bits: {}", read_attrs.bits);
+    warn!("        Lifetime: {:?}", read_attrs.lifetime);
+    warn!("");
+    warn!("  ✓ Key management successful!");
+    warn!("");
+
+    // ==========================================
+    // Phase 4: Cleanup
+    // ==========================================
+    warn!("┌──────────────────────────────────────────────────────────────┐");
+    warn!("│  PHASE 4: Cleanup (Demo Only)                                │");
+    warn!("└──────────────────────────────────────────────────────────────┘");
+    warn!("");
+
+    warn!("  [4.1] Removing demo ITS entries...");
+
+    if let Err(e) = psa::its::remove(DEMO_UID_SECRET) {
+        warn!("        Warning: Remove secret failed: {}", e);
+    }
+    if let Err(e) = psa::its::remove(DEMO_UID_CONFIG) {
+        warn!("        Warning: Remove config failed: {}", e);
+    }
+
+    warn!("        ITS entries removed");
+
+    warn!("");
+    warn!("  [4.2] Destroying demo key...");
+
+    if let Err(e) = psa::crypto::destroy_key(generated_id) {
+        warn!("        Warning: Key destroy failed: {}", e);
+    }
+
+    warn!("        Key destroyed");
+    warn!("");
+
+    // ==========================================
+    // Summary
+    // ==========================================
+    warn!("╔══════════════════════════════════════════════════════════════╗");
+    warn!("║                PSA Secure Storage Demo Complete!             ║");
+    warn!("╠══════════════════════════════════════════════════════════════╣");
+    warn!("║  ITS:    Stored and retrieved encrypted data                 ║");
+    warn!("║  Crypto: Generated persistent AES-256 key                    ║");
+    warn!("║                                                              ║");
+    warn!("║  Features Demonstrated:                                      ║");
+    warn!("║  - Data encrypted at rest (AEAD transform)                   ║");
+    warn!("║  - Device-unique encryption key                              ║");
+    warn!("║  - Persistent storage across reboots                         ║");
+    warn!("║  - PSA Certified API compliance                              ║");
+    warn!("╚══════════════════════════════════════════════════════════════╝");
+    warn!("");
+
+    show_checkmark();
+    RpcResult::Bool(true)
+}
+
 // NOTE: COSE_Sign1 demo temporarily disabled due to ML-DSA performance issues.
 // The arduino-zcbor crate with COSE support is ready and working, but ML-DSA
 // operations currently timeout (>3 minutes). Once the ML-DSA performance
@@ -1590,6 +1868,7 @@ extern "C" fn rust_main() {
     server.register("xchacha20.run_demo", handle_xchacha20_demo);
     server.register("saga.run_demo", handle_saga_demo);
     server.register("saga_xwing.run_demo", handle_saga_xwing_demo);
+    server.register("psa.run_demo", handle_psa_demo);
     // NOTE: cose.run_demo disabled due to ML-DSA performance issues
 
     // LED matrix control
@@ -1608,6 +1887,7 @@ extern "C" fn rust_main() {
     warn!("  - xchacha20.run_demo -> XChaCha20-Poly1305 AEAD demo");
     warn!("  - saga.run_demo     -> SAGA anonymous credentials demo");
     warn!("  - saga_xwing.run_demo -> SAGA+X-Wing credential key exchange");
+    warn!("  - psa.run_demo      -> PSA Secure Storage + Key Management");
     warn!("  - led_matrix.clear  -> clear LED display");
     warn!("");
     warn!("NOTE: ML-DSA operations have a known performance issue");

@@ -87,7 +87,7 @@ Linux-side RPC client library for calling MCU methods.
 
 ### arduino-cryptography (MCU)
 
-Comprehensive cryptography library for the MCU, providing post-quantum, classical, and anonymous credential cryptographic primitives.
+Comprehensive cryptography library for the MCU, providing post-quantum, classical, anonymous credential, and secure storage cryptographic primitives.
 
 **Features:**
 
@@ -96,6 +96,9 @@ Comprehensive cryptography library for the MCU, providing post-quantum, classica
 - **X-Wing** (draft-connolly-cfrg-xwing-kem) - Hybrid PQ/classical KEM combining ML-KEM-768 + X25519
 - **SAGA** - BBS-style MAC for anonymous credentials with unlinkable presentations
 - **SAGA + X-Wing** - Credential-protected post-quantum key exchange
+- **PSA Secure Storage** - Encrypted persistent storage via Zephyr Secure Storage
+  - **PSA ITS** (Internal Trusted Storage) - Store arbitrary encrypted data
+  - **PSA Crypto Key Management** - Generate, import, export, and manage cryptographic keys
 - **XChaCha20-Poly1305** - Authenticated encryption with 24-byte nonces (via mbedTLS)
 - **X25519** - Classical elliptic curve Diffie-Hellman key exchange
 - **Ed25519** - Classical elliptic curve digital signatures
@@ -128,8 +131,9 @@ Post-quantum key exchange demonstration using ML-KEM 768 between MCU and Linux.
 
 ### pqc-demo (MCU) + pqc-client (Linux)
 
-Complete cryptography demonstration showcasing post-quantum, classical, and anonymous credential algorithms:
+Complete cryptography demonstration showcasing post-quantum, classical, anonymous credential, and secure storage algorithms:
 
+- **PSA Secure Storage** - Encrypted persistent storage + key management (~2 seconds)
 - **ML-KEM 768** - Post-quantum key encapsulation (~2 seconds)
 - **ML-DSA 65** - Post-quantum digital signatures (~60+ seconds)
 - **X-Wing** - Hybrid PQ KEM combining ML-KEM-768 + X25519 (~2 seconds)
@@ -210,7 +214,7 @@ make run-linux APP=weather-display ARGS='--interval 300'
 
 ### Running the PQC Demo
 
-The PQC demo demonstrates post-quantum cryptography (ML-KEM 768) running entirely on the MCU with LED matrix visual feedback.
+The PQC demo demonstrates cryptography running entirely on the MCU with LED matrix visual feedback, including post-quantum algorithms, anonymous credentials, and secure storage.
 
 **Prerequisites:**
 
@@ -223,43 +227,46 @@ The PQC demo demonstrates post-quantum cryptography (ML-KEM 768) running entirel
 ```bash
 # 1. Build and flash the PQC demo firmware to MCU
 make build APP=pqc-demo
-make flash APP=pqc-demo
+make flash
 
 # 2. Build and deploy the pqc-client Linux app
 make build-linux APP=pqc-client
 make deploy-linux APP=pqc-client
 
-# 3. Run demos (via adb shell or make targets)
+# 3. Run demos using make targets
 
-# Ping the MCU
-make pqc-ping
+# List all available demos
+make demo-list
+
+# Run PSA Secure Storage demo (fast, ~2 seconds)
+make demo DEMO=psa
 
 # Run ML-KEM demo (fast, ~2 seconds)
-make pqc CMD='--mlkem-demo'
+make demo DEMO=mlkem
 
 # Run X-Wing hybrid PQ KEM demo (fast, ~2 seconds)
-make pqc CMD='--xwing-demo'
+make demo DEMO=xwing
 
-# Run XChaCha20-Poly1305 AEAD demo (fast, ~1 second)
-make pqc CMD='--xchacha20-demo'
+# Run SAGA anonymous credentials demo (~5 seconds)
+make demo DEMO=saga
 
-# Run X25519 ECDH demo (fast, ~1 second)
-make pqc CMD='--x25519-demo'
+# Run SAGA + X-Wing credential key exchange (~4 seconds)
+make demo DEMO=saga-xwing
 
 # Run Ed25519 signature demo (fast, ~1 second)
-make pqc CMD='--ed25519-demo'
+make demo DEMO=ed25519
 
-# Run SAGA anonymous credentials demo (fast, ~5 seconds)
-make pqc CMD='--saga-demo'
+# Run X25519 ECDH demo (fast, ~1 second)
+make demo DEMO=x25519
 
-# Run SAGA + X-Wing credential key exchange (fast, ~4 seconds)
-make pqc CMD='--saga-xwing-demo'
+# Run XChaCha20-Poly1305 AEAD demo (fast, ~1 second)
+make demo DEMO=xchacha20
 
 # Run ML-DSA demo (slow, >60 seconds)
-make pqc CMD='--mldsa-demo'
+make demo DEMO=mldsa
 
-# Run COSE_Sign1 demo (slow, ~90 seconds)
-make pqc CMD='--cose-demo'
+# To see detailed output, open serial console in another terminal
+make serial
 ```
 
 **LED Matrix Indicators:**

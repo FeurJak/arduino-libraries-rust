@@ -37,3 +37,24 @@
 &rng {
 	status = "okay";
 };
+
+/* 
+ * Configure storage partition for PSA ITS (Internal Trusted Storage)
+ * 
+ * The base board DTS already defines storage_partition at 0xe0000 (128KB).
+ * We add the 'its_partition' label required by Zephyr Secure Storage subsystem.
+ * This allows PSA ITS to store encrypted credentials and keys persistently.
+ */
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* Add ITS partition label to existing storage partition */
+		its_partition: partition@e0000 {
+			label = "its_storage";
+			reg = <0x000e0000 DT_SIZE_K(64)>;
+		};
+	};
+};

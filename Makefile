@@ -35,7 +35,7 @@ APP ?= led-matrix
 # Board connection settings (can override with environment variables)
 BOARD_IP ?= 192.168.1.199
 BOARD_USER ?= arduino
-BOARD_PASS ?= password
+BOARD_PASS ?= Asdfqwer1!
 
 # Linux app configuration
 LINUX_TARGET := aarch64-unknown-linux-gnu
@@ -116,49 +116,45 @@ help:
 	@echo "$(CYAN)Arduino Libraries Rust$(NC)"
 	@echo ""
 	@echo "$(GREEN)Quick Start (MCU Firmware):$(NC)"
-	@echo "  make build              - Build the default demo (led-matrix)"
-	@echo "  make build APP=rpc      - Build the RPC demo"
+	@echo "  make build APP=pqc-demo - Build the PQC demo firmware"
 	@echo "  make flash              - Flash to the board"
-	@echo "  make all                - Build and flash (default)"
+	@echo "  make all APP=pqc-demo   - Build and flash"
+	@echo ""
+	@echo "$(GREEN)Run Demos (after flashing):$(NC)"
+	@echo "  make demo DEMO=psa      - Run PSA Secure Storage demo"
+	@echo "  make demo DEMO=mlkem    - Run ML-KEM 768 demo"
+	@echo "  make demo DEMO=xwing    - Run X-Wing hybrid PQ KEM demo"
+	@echo "  make demo DEMO=saga     - Run SAGA anonymous credentials demo"
+	@echo "  make demo-list          - Show all available demos"
+	@echo "  make serial             - Open serial console (see demo output)"
 	@echo ""
 	@echo "$(GREEN)MCU Apps (run on STM32U585):$(NC)"
-	@echo "  led-matrix (default)    - LED matrix demo"
+	@echo "  pqc-demo                - Post-quantum cryptography demo"
+	@echo "  led-matrix              - LED matrix demo"
 	@echo "  rpc                     - RPC bridge demo (UART)"
-	@echo "  spi-test                - SPI communication test"
 	@echo "  rpc-server              - RPC server with LED matrix (SPI)"
 	@echo ""
 	@echo "$(GREEN)Linux Apps (run on QRB2210 MPU):$(NC)"
-	@echo "  make build-linux APP=weather-display  - Build Linux app"
-	@echo "  make deploy-linux APP=weather-display - Deploy to board"
-	@echo "  make run-linux APP=weather-display    - Run on board (once)"
-	@echo "  make run-linux APP=weather-display ARGS='--demo' - Run with args"
-	@echo ""
-	@echo "$(GREEN)SPI Router Setup:$(NC)"
-	@echo "  make setup-spi-router   - Build, deploy, and install spi-router service"
-	@echo "  make install-spi-router - Install systemd service (after deploy)"
-	@echo ""
-	@echo "$(GREEN)Available Linux Apps:$(NC)"
-	@echo "  weather-display         - Weather display on LED matrix"
-	@echo "  spi-router              - SPI router daemon"
+	@echo "  make build-linux APP=pqc-client       - Build pqc-client"
+	@echo "  make deploy-linux APP=pqc-client      - Deploy to board"
+	@echo "  make setup-spi-router                 - Setup SPI router service"
 	@echo ""
 	@echo "$(GREEN)Development:$(NC)"
 	@echo "  make shell              - Open a shell in the Docker container"
 	@echo "  make clean              - Remove build artifacts"
 	@echo "  make distclean          - Remove build artifacts and Docker image"
 	@echo ""
-	@echo "$(GREEN)Setup:$(NC)"
-	@echo "  make docker-build       - Rebuild the Docker image"
-	@echo "  make setup-swd          - Copy SWD config to board (first-time)"
-	@echo ""
 	@echo "$(GREEN)Board Access:$(NC)"
-	@echo "  make shell-board        - Open ADB shell to board"
 	@echo "  make ssh-board          - SSH to board"
+	@echo "  make serial             - Open serial console to MCU"
+	@echo "  make ping               - Ping the MCU"
+	@echo "  make version            - Get MCU firmware version"
 	@echo ""
 	@echo "$(YELLOW)Requirements:$(NC)"
 	@echo "  - Docker (for building MCU firmware)"
 	@echo "  - cargo-zigbuild (for Linux apps): cargo install cargo-zigbuild"
 	@echo "  - ADB (for flashing): brew install android-platform-tools"
-	@echo "  - sshpass (for SSH deploy): brew install hudochenkov/sshpass/sshpass"
+	@echo "  - sshpass (for SSH): brew install hudochenkov/sshpass/sshpass"
 
 # Check if Docker is available
 check-docker:
@@ -411,7 +407,59 @@ ssh-board: check-ssh
 	sshpass -p '$(BOARD_PASS)' ssh $(BOARD_USER)@$(BOARD_IP)
 
 # =============================================================================
-# Quick Demo Targets (via ADB - no password needed)
+# Demo Targets (via SSH)
+# =============================================================================
+
+# Default demo to run
+DEMO ?= psa
+
+# Run a demo on the MCU
+# Usage: make demo DEMO=psa
+#        make demo DEMO=mlkem
+#        make demo DEMO=xwing
+demo: check-ssh
+	@echo "$(CYAN)Running $(DEMO) demo on MCU...$(NC)"
+	@echo "Watch the LED matrix for status indicators!"
+	@echo ""
+	sshpass -p '$(BOARD_PASS)' ssh $(BOARD_USER)@$(BOARD_IP) "/home/$(BOARD_USER)/pqc-client --$(DEMO)-demo"
+
+# List available demos
+demo-list:
+	@echo "$(CYAN)Available demos:$(NC)"
+	@echo "  make demo DEMO=psa         - PSA Secure Storage + Key Management"
+	@echo "  make demo DEMO=mlkem       - ML-KEM 768 (Post-Quantum KEM)"
+	@echo "  make demo DEMO=xwing       - X-Wing Hybrid PQ KEM"
+	@echo "  make demo DEMO=saga        - SAGA Anonymous Credentials"
+	@echo "  make demo DEMO=saga-xwing  - SAGA + X-Wing Credential Key Exchange"
+	@echo "  make demo DEMO=ed25519     - Ed25519 Digital Signatures"
+	@echo "  make demo DEMO=x25519      - X25519 Key Agreement"
+	@echo "  make demo DEMO=xchacha20   - XChaCha20-Poly1305 AEAD"
+	@echo "  make demo DEMO=mldsa       - ML-DSA 65 (WARNING: slow, may timeout)"
+	@echo ""
+	@echo "$(CYAN)Other commands:$(NC)"
+	@echo "  make ping                  - Ping the MCU"
+	@echo "  make version               - Get MCU firmware version"
+	@echo "  make serial                - Open serial console to see demo output"
+
+# Ping the MCU
+ping: check-ssh
+	@sshpass -p '$(BOARD_PASS)' ssh $(BOARD_USER)@$(BOARD_IP) "/home/$(BOARD_USER)/pqc-client ping"
+
+# Get MCU version
+version: check-ssh
+	@sshpass -p '$(BOARD_PASS)' ssh $(BOARD_USER)@$(BOARD_IP) "/home/$(BOARD_USER)/pqc-client version"
+
+# Open serial console to monitor MCU output
+serial: check-ssh
+	@echo "$(CYAN)Opening serial console to MCU (Ctrl+A then X to exit)...$(NC)"
+	sshpass -p '$(BOARD_PASS)' ssh -t $(BOARD_USER)@$(BOARD_IP) "picocom -b 115200 /dev/ttyACM0"
+
+# Run any RPC command: make rpc CMD='psa.run_demo'
+rpc: check-ssh
+	sshpass -p '$(BOARD_PASS)' ssh $(BOARD_USER)@$(BOARD_IP) "/home/$(BOARD_USER)/pqc-client $(CMD)"
+
+# =============================================================================
+# Legacy Demo Targets (via ADB - kept for compatibility)
 # =============================================================================
 
 # Run PQC ML-KEM demo on MCU
@@ -419,26 +467,19 @@ pqc-demo: check-adb
 	@echo "$(CYAN)Running ML-KEM 768 demo on MCU...$(NC)"
 	@echo "Watch the LED matrix for status indicators!"
 	@echo ""
-	adb shell "/home/arduino/pqc-client --mlkem-demo"
+	adb shell "/home/arduino/pqc-client mlkem.run_demo"
 
 # Run PQC ML-DSA demo on MCU (slow - may take >60s)
 pqc-demo-dsa: check-adb
 	@echo "$(CYAN)Running ML-DSA 65 demo on MCU (this is slow)...$(NC)"
 	@echo "Watch the LED matrix for status indicators!"
 	@echo ""
-	adb shell "/home/arduino/pqc-client --mldsa-demo"
+	adb shell "/home/arduino/pqc-client mldsa.run_demo"
 
-# Run COSE_Sign1 demo on MCU (slow - may take >60s)
-cose-demo: check-adb
-	@echo "$(CYAN)Running COSE_Sign1 demo on MCU (RFC 9052 with ML-DSA)...$(NC)"
-	@echo "Watch the LED matrix for status indicators!"
-	@echo ""
-	adb shell "/home/arduino/pqc-client --cose-demo"
-
-# Ping the MCU
+# Ping the MCU (via ADB)
 pqc-ping: check-adb
-	adb shell "/home/arduino/pqc-client --ping"
+	adb shell "/home/arduino/pqc-client ping"
 
-# Run any pqc-client command: make pqc CMD='--help'
+# Run any pqc-client command via ADB: make pqc CMD='psa.run_demo'
 pqc: check-adb
 	adb shell "/home/arduino/pqc-client $(CMD)"
