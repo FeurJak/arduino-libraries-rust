@@ -47,3 +47,9 @@ x25519 = []
 
 # Hybrid post-quantum key encapsulation
 xwing = ["x25519", "mlkem768"]
+
+# Authenticated encryption (via mbedTLS)
+xchacha20poly1305 = ["rng"]
+
+# Hardware RNG (always needed for secure crypto)
+rng = []

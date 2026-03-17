@@ -12,6 +12,7 @@ Comprehensive cryptographic primitives for the Arduino Uno Q (STM32U585 MCU), pr
 ### Classical Cryptography
 - **X25519** - Elliptic curve Diffie-Hellman key exchange (Curve25519)
 - **Ed25519** - Elliptic curve digital signatures (Edwards curve)
+- **XChaCha20-Poly1305** - Authenticated encryption with 24-byte nonces (via mbedTLS)
 
 ### Standards Support
 - **COSE_Sign1** (RFC 9052) - CBOR Object Signing and Encryption with ML-DSA
@@ -132,6 +133,31 @@ let signature = secret_key.sign(message);
 assert!(public_key.verify(message, &signature));
 ```
 
+### XChaCha20-Poly1305 Example
+
+```rust
+use arduino_cryptography::{xchacha20poly1305::{Key, Nonce, encrypt, decrypt}, rng::HwRng};
+
+let rng = HwRng::new();
+
+// Generate a random key (do this once, store securely)
+let key_bytes: [u8; 32] = rng.random_array();
+let key = Key::from_bytes(&key_bytes);
+
+// Generate a random nonce (must be unique per message)
+let nonce_bytes: [u8; 24] = rng.random_array();
+let nonce = Nonce::from_bytes(&nonce_bytes);
+
+// Encrypt a message
+let plaintext = b"Secret message";
+let aad = b"additional authenticated data";
+let (ciphertext, tag) = encrypt(&key, &nonce, plaintext, aad).unwrap();
+
+// Decrypt the message
+let decrypted = decrypt(&key, &nonce, &ciphertext, &tag, aad).unwrap();
+assert_eq!(plaintext.as_slice(), decrypted.as_slice());
+```
+
 ## Hardware RNG Setup
 
 The `HwRng` module requires some setup in your Zephyr project:
@@ -196,6 +222,9 @@ target_sources(app PRIVATE arduino-cryptography/c/hwrng.c)
 | Ed25519 | Secret Key | 32 |
 | Ed25519 | Public Key | 32 |
 | Ed25519 | Signature | 64 |
+| XChaCha20-Poly1305 | Key | 32 |
+| XChaCha20-Poly1305 | Nonce | 24 |
+| XChaCha20-Poly1305 | Tag | 16 |
 
 ## Performance on STM32U585
 
@@ -227,6 +256,8 @@ target_sources(app PRIVATE arduino-cryptography/c/hwrng.c)
 | Ed25519 Key Generation | <1ms |
 | Ed25519 Signing | <1ms |
 | Ed25519 Verification | <1ms |
+| XChaCha20-Poly1305 Encrypt | <1ms (per KB) |
+| XChaCha20-Poly1305 Decrypt | <1ms (per KB) |
 
 Note: ML-DSA operations are computationally intensive on Cortex-M33. X-Wing adds minimal overhead to ML-KEM since X25519 is extremely fast.
 
@@ -245,12 +276,14 @@ arduino-cryptography = { path = "../../arduino-cryptography", features = ["mlkem
 | `mldsa` | ML-DSA 65 digital signatures | libcrux-iot-mldsa |
 | `xwing` | X-Wing hybrid KEM | mlkem, x25519, libcrux-iot-sha3 |
 | `x25519` | X25519 ECDH | C implementation |
-| `ed25519` | Ed25519 signatures | C implementation |
+| `ed25519` | Ed25519 signatures | C implementation (mbedTLS SHA512) |
+| `xchacha20poly1305` | XChaCha20-Poly1305 AEAD | mbedTLS, rng |
 | `cose` | COSE_Sign1 (RFC 9052) | mldsa |
+| `rng` | Hardware RNG support | Zephyr entropy API |
 
 ## CMakeLists.txt Setup
 
-For features requiring C code (x25519, ed25519), add to your CMakeLists.txt:
+For features requiring C code, add to your CMakeLists.txt:
 
 ```cmake
 # Add X25519 implementation
@@ -259,8 +292,26 @@ target_sources(app PRIVATE ${CMAKE_SOURCE_DIR}/../../arduino-cryptography/c/x255
 # Add Ed25519 implementation  
 target_sources(app PRIVATE ${CMAKE_SOURCE_DIR}/../../arduino-cryptography/c/ed25519.c)
 
+# Add XChaCha20-Poly1305 implementation (requires mbedTLS)
+target_sources(app PRIVATE ${CMAKE_SOURCE_DIR}/../../arduino-cryptography/c/xchacha20poly1305.c)
+
 # Add hardware RNG wrapper
 target_sources(app PRIVATE ${CMAKE_SOURCE_DIR}/../../arduino-cryptography/c/hwrng.c)
+```
+
+## prj.conf Setup
+
+For XChaCha20-Poly1305 and Ed25519, enable mbedTLS in your prj.conf:
+
+```
+CONFIG_MBEDTLS=y
+CONFIG_MBEDTLS_BUILTIN=y
+CONFIG_MBEDTLS_CIPHER_CHACHA20_ENABLED=y
+CONFIG_MBEDTLS_POLY1305=y
+CONFIG_MBEDTLS_CHACHAPOLY_AEAD_ENABLED=y
+CONFIG_MBEDTLS_HASH_ALL_ENABLED=y
+CONFIG_MBEDTLS_ENABLE_HEAP=y
+CONFIG_MBEDTLS_HEAP_SIZE=8192
 ```
 
 ## Dependencies
@@ -273,8 +324,10 @@ target_sources(app PRIVATE ${CMAKE_SOURCE_DIR}/../../arduino-cryptography/c/hwrn
 - [FIPS 203 (ML-KEM)](https://csrc.nist.gov/pubs/fips/203/final) - Module-Lattice-Based Key-Encapsulation Mechanism
 - [FIPS 204 (ML-DSA)](https://csrc.nist.gov/pubs/fips/204/final) - Module-Lattice-Based Digital Signature Algorithm
 - [draft-connolly-cfrg-xwing-kem](https://datatracker.ietf.org/doc/draft-connolly-cfrg-xwing-kem/) - X-Wing Hybrid KEM
+- [draft-irtf-cfrg-xchacha](https://datatracker.ietf.org/doc/draft-irtf-cfrg-xchacha/) - XChaCha20 and XChaCha20-Poly1305
 - [RFC 7748](https://datatracker.ietf.org/doc/html/rfc7748) - Elliptic Curves for Security (X25519)
 - [RFC 8032](https://datatracker.ietf.org/doc/html/rfc8032) - Edwards-Curve Digital Signature Algorithm (Ed25519)
+- [RFC 8439](https://datatracker.ietf.org/doc/html/rfc8439) - ChaCha20 and Poly1305 for IETF Protocols
 - [RFC 9052](https://datatracker.ietf.org/doc/html/rfc9052) - CBOR Object Signing and Encryption (COSE)
 
 ## License

@@ -94,6 +94,7 @@ Comprehensive cryptography library for the MCU, providing both post-quantum and 
 - **ML-KEM 768** (FIPS 203) - Post-quantum key encapsulation
 - **ML-DSA 65** (FIPS 204) - Post-quantum digital signatures
 - **X-Wing** (draft-connolly-cfrg-xwing-kem) - Hybrid PQ/classical KEM combining ML-KEM-768 + X25519
+- **XChaCha20-Poly1305** - Authenticated encryption with 24-byte nonces (via mbedTLS)
 - **X25519** - Classical elliptic curve Diffie-Hellman key exchange
 - **Ed25519** - Classical elliptic curve digital signatures
 - **COSE_Sign1** (RFC 9052) - CBOR Object Signing with ML-DSA
@@ -130,6 +131,7 @@ Complete cryptography demonstration showcasing both post-quantum and classical a
 - **ML-KEM 768** - Post-quantum key encapsulation (~2 seconds)
 - **ML-DSA 65** - Post-quantum digital signatures (~60+ seconds)
 - **X-Wing** - Hybrid PQ KEM combining ML-KEM-768 + X25519 (~2 seconds)
+- **XChaCha20-Poly1305** - Authenticated encryption with 24-byte nonces (~1 second)
 - **X25519** - Classical ECDH key exchange (~1 second)
 - **Ed25519** - Classical digital signatures (~1 second)
 - **COSE_Sign1** - RFC 9052 signing with ML-DSA (~90 seconds)
@@ -233,6 +235,9 @@ make pqc CMD='--mlkem-demo'
 
 # Run X-Wing hybrid PQ KEM demo (fast, ~2 seconds)
 make pqc CMD='--xwing-demo'
+
+# Run XChaCha20-Poly1305 AEAD demo (fast, ~1 second)
+make pqc CMD='--xchacha20-demo'
 
 # Run X25519 ECDH demo (fast, ~1 second)
 make pqc CMD='--x25519-demo'

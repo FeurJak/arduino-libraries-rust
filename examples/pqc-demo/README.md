@@ -12,6 +12,7 @@ This example demonstrates comprehensive cryptographic operations running entirel
 ### Classical Cryptography
 - **X25519**: Elliptic curve Diffie-Hellman key exchange
 - **Ed25519**: Elliptic curve digital signatures
+- **XChaCha20-Poly1305**: Authenticated encryption with 24-byte nonces
 
 ### Standards
 - **COSE_Sign1** (RFC 9052): CBOR Object Signing with ML-DSA
@@ -47,6 +48,7 @@ make pqc-ping
 # Fast demos (< 3 seconds)
 make pqc CMD='--mlkem-demo'      # ML-KEM 768 key encapsulation
 make pqc CMD='--xwing-demo'      # X-Wing hybrid PQ KEM (ML-KEM + X25519)
+make pqc CMD='--xchacha20-demo'  # XChaCha20-Poly1305 AEAD
 make pqc CMD='--x25519-demo'     # X25519 ECDH key exchange
 make pqc CMD='--ed25519-demo'    # Ed25519 digital signatures
 
@@ -88,6 +90,14 @@ X-Wing provides IND-CCA2 security if either ML-KEM or X25519 remains secure - he
 2. **Signing**: Signs a test message, producing a 64 byte signature
 3. **Verification**: Verifies the signature against the public key
 
+### XChaCha20-Poly1305 Demo (~1 second)
+
+1. **Key Generation**: Generates random 256-bit encryption key
+2. **Nonce Generation**: Generates random 24-byte nonce (safe for random generation)
+3. **Encryption**: Encrypts a test message with authentication
+4. **Decryption**: Authenticates and decrypts the message
+5. **Verification**: Confirms decrypted plaintext matches original
+
 ### ML-DSA Demo (~60+ seconds)
 
 1. **Key Generation**: Generates ML-DSA 65 key pair (1952 byte verification key)
@@ -119,6 +129,7 @@ Note: ML-DSA operations are computationally intensive on Cortex-M33.
 - `mlkem.run_demo` - ML-KEM 768 demo only
 - `mldsa.run_demo` - ML-DSA 65 demo only
 - `xwing.run_demo` - X-Wing hybrid KEM demo
+- `xchacha20.run_demo` - XChaCha20-Poly1305 AEAD demo
 - `x25519.run_demo` - X25519 ECDH demo
 - `ed25519.run_demo` - Ed25519 signature demo
 - `cose.run_demo` - COSE_Sign1 with ML-DSA demo
@@ -161,6 +172,9 @@ Note: ML-DSA operations are computationally intensive on Cortex-M33.
 | Ed25519 | Secret Key | 32 |
 | Ed25519 | Public Key | 32 |
 | Ed25519 | Signature | 64 |
+| XChaCha20-Poly1305 | Key | 32 |
+| XChaCha20-Poly1305 | Nonce | 24 |
+| XChaCha20-Poly1305 | Tag | 16 |
 
 ## Performance
 
@@ -178,6 +192,8 @@ Note: ML-DSA operations are computationally intensive on Cortex-M33.
 | X25519 Diffie-Hellman | <1ms |
 | Ed25519 Key Generation | <1ms |
 | Ed25519 Sign/Verify | <1ms |
+| XChaCha20-Poly1305 Encrypt | <1ms |
+| XChaCha20-Poly1305 Decrypt | <1ms |
 
 ### Slow Operations (> 30 seconds)
 
@@ -191,7 +207,7 @@ Note: ML-DSA operations are computationally intensive on Cortex-M33.
 
 - Stack: 48KB (configured in prj.conf)
 - Heap: 32KB
-- Flash: ~248KB (with all crypto algorithms enabled)
+- Flash: ~260KB (with all crypto algorithms enabled including XChaCha20-Poly1305)
 
 ## Implementation Notes
 
@@ -259,6 +275,7 @@ pqc-client --mcu-demo           Run full PQC demo (ML-KEM + ML-DSA)
 pqc-client --mlkem-demo         Run ML-KEM 768 demo
 pqc-client --mldsa-demo         Run ML-DSA 65 demo (slow!)
 pqc-client --xwing-demo         Run X-Wing hybrid PQ KEM demo
+pqc-client --xchacha20-demo     Run XChaCha20-Poly1305 AEAD demo
 pqc-client --x25519-demo        Run X25519 ECDH demo
 pqc-client --ed25519-demo       Run Ed25519 signature demo
 pqc-client --cose-demo          Run COSE_Sign1 demo

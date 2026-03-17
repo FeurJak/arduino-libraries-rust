@@ -48,6 +48,13 @@ pub mod x25519;
 #[cfg(feature = "xwing")]
 pub mod xwing;
 
+/// XChaCha20-Poly1305 authenticated encryption (RFC draft-irtf-cfrg-xchacha).
+///
+/// Provides AEAD encryption with 24-byte nonces (safe for random generation).
+/// See the module documentation for setup requirements.
+#[cfg(feature = "xchacha20poly1305")]
+pub mod xchacha20poly1305;
+
 /// Re-export ML-KEM types and functions
 pub mod mlkem {
     #[cfg(feature = "mlkem512")]

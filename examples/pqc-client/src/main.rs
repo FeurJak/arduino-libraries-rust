@@ -74,6 +74,10 @@ struct Args {
     #[arg(long)]
     xwing_demo: bool,
 
+    /// Run the MCU-side XChaCha20-Poly1305 AEAD demo
+    #[arg(long)]
+    xchacha20_demo: bool,
+
     /// Just ping the MCU
     #[arg(short, long)]
     ping: bool,
@@ -439,6 +443,35 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if args.xchacha20_demo {
+        info!("");
+        info!("Running XChaCha20-Poly1305 AEAD demo on MCU...");
+        info!("XChaCha20-Poly1305 provides authenticated encryption with 24-byte nonces");
+        info!("Watch the LED matrix for status indicators!");
+        info!("");
+        match client.call_timeout("xchacha20.run_demo", vec![], demo_timeout) {
+            Ok(result) => {
+                info!("XChaCha20-Poly1305 demo completed: {:?}", result);
+                info!("");
+                info!("The MCU successfully:");
+                info!("  - Generated a random 256-bit key");
+                info!("  - Generated a random 24-byte nonce");
+                info!("  - Encrypted a message with authentication");
+                info!("  - Decrypted and verified the message");
+                info!("");
+                info!("XChaCha20-Poly1305 provides:");
+                info!("  - Authenticated encryption (AEAD)");
+                info!("  - 24-byte nonces (safe for random generation)");
+                info!("  - High performance symmetric encryption");
+            }
+            Err(e) => {
+                error!("XChaCha20-Poly1305 demo failed: {}", e);
+                return Err(e.into());
+            }
+        }
+        return Ok(());
+    }
+
     if args.demo {
         return run_demo(&client, &args.message);
     }
@@ -453,6 +486,7 @@ fn main() -> Result<()> {
     info!("  pqc-client --ed25519-demo       Run Ed25519 demo on MCU (fast!)");
     info!("  pqc-client --x25519-demo        Run X25519 ECDH demo on MCU (fast!)");
     info!("  pqc-client --xwing-demo         Run X-Wing hybrid PQ KEM demo on MCU");
+    info!("  pqc-client --xchacha20-demo     Run XChaCha20-Poly1305 AEAD demo on MCU");
     info!("  pqc-client --cose-demo          Run COSE_Sign1 demo on MCU");
     info!("  pqc-client --demo               Run local simulation demo");
     info!("  pqc-client --demo -m \"msg\"      Demo with custom message");

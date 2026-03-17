@@ -35,7 +35,7 @@
 
 use log::warn;
 
-use arduino_cryptography::{dsa, ed25519, kem, rng::HwRng, x25519, xwing};
+use arduino_cryptography::{dsa, ed25519, kem, rng::HwRng, x25519, xchacha20poly1305, xwing};
 use arduino_led_matrix::{Frame, LedMatrix};
 use arduino_rpc_bridge::{RpcResult, RpcServer, SpiTransport, Transport};
 use zephyr::time::{sleep, Duration};
@@ -830,6 +830,159 @@ fn handle_xwing_demo(_count: usize) -> RpcResult {
     }
 }
 
+/// Run XChaCha20-Poly1305 demo on-device
+/// Demonstrates: authenticated encryption with 24-byte nonces
+fn handle_xchacha20_demo(_count: usize) -> RpcResult {
+    warn!("");
+    warn!("========================================");
+    warn!("  XChaCha20-Poly1305 Demo");
+    warn!("  Authenticated Encryption (AEAD)");
+    warn!("  24-byte nonces (safe for random gen)");
+    warn!("  Using Hardware TRNG for randomness");
+    warn!("========================================");
+    warn!("");
+
+    // Initialize hardware RNG
+    let rng = HwRng::new();
+
+    // Step 1: Generate encryption key
+    warn!("Step 1: Generating 256-bit encryption key...");
+    show_key();
+    sleep(Duration::millis_at_least(300));
+
+    let key_bytes: [u8; xchacha20poly1305::KEY_SIZE] = rng.random_array();
+    let key = xchacha20poly1305::Key::from_bytes(&key_bytes);
+
+    warn!(
+        "  Key size: {} bytes (256 bits)",
+        xchacha20poly1305::KEY_SIZE
+    );
+    warn!(
+        "  Key prefix: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        key_bytes[0],
+        key_bytes[1],
+        key_bytes[2],
+        key_bytes[3],
+        key_bytes[4],
+        key_bytes[5],
+        key_bytes[6],
+        key_bytes[7]
+    );
+
+    // Step 2: Generate random nonce
+    warn!("");
+    warn!("Step 2: Generating random 24-byte nonce...");
+    sleep(Duration::millis_at_least(200));
+
+    let nonce_bytes: [u8; xchacha20poly1305::NONCE_SIZE] = rng.random_array();
+    let nonce = xchacha20poly1305::Nonce::from_bytes(&nonce_bytes);
+
+    warn!(
+        "  Nonce size: {} bytes (192 bits)",
+        xchacha20poly1305::NONCE_SIZE
+    );
+    warn!(
+        "  Nonce prefix: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        nonce_bytes[0],
+        nonce_bytes[1],
+        nonce_bytes[2],
+        nonce_bytes[3],
+        nonce_bytes[4],
+        nonce_bytes[5],
+        nonce_bytes[6],
+        nonce_bytes[7]
+    );
+
+    // Step 3: Encrypt a message
+    warn!("");
+    warn!("Step 3: Encrypting message...");
+    show_lock();
+    sleep(Duration::millis_at_least(300));
+
+    let plaintext = b"Hello from Arduino Uno Q with XChaCha20-Poly1305!";
+    let aad = b"authenticated-but-not-encrypted";
+
+    warn!("  Plaintext: \"Hello from Arduino Uno Q with XChaCha20-Poly1305!\"");
+    warn!("  Plaintext size: {} bytes", plaintext.len());
+    warn!("  AAD: \"authenticated-but-not-encrypted\"");
+    warn!("  AAD size: {} bytes", aad.len());
+
+    let (ciphertext, tag) = match xchacha20poly1305::encrypt(&key, &nonce, plaintext, aad) {
+        Ok(result) => result,
+        Err(e) => {
+            warn!("  FAILURE: Encryption failed: {:?}", e);
+            show_x();
+            return RpcResult::Error(-1, "Encryption failed");
+        }
+    };
+
+    warn!("  Ciphertext size: {} bytes", ciphertext.len());
+    warn!("  Tag size: {} bytes", xchacha20poly1305::TAG_SIZE);
+    warn!(
+        "  Ciphertext prefix: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        ciphertext[0],
+        ciphertext[1],
+        ciphertext[2],
+        ciphertext[3],
+        ciphertext[4],
+        ciphertext[5],
+        ciphertext[6],
+        ciphertext[7]
+    );
+
+    let tag_bytes = tag.to_bytes();
+    warn!(
+        "  Tag: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}...",
+        tag_bytes[0],
+        tag_bytes[1],
+        tag_bytes[2],
+        tag_bytes[3],
+        tag_bytes[4],
+        tag_bytes[5],
+        tag_bytes[6],
+        tag_bytes[7]
+    );
+
+    // Step 4: Decrypt the message
+    warn!("");
+    warn!("Step 4: Decrypting and authenticating...");
+    show_shield();
+    sleep(Duration::millis_at_least(300));
+
+    let decrypted = match xchacha20poly1305::decrypt(&key, &nonce, &ciphertext, &tag, aad) {
+        Ok(result) => result,
+        Err(xchacha20poly1305::Error::AuthenticationFailed) => {
+            warn!("  FAILURE: Authentication failed (data tampered?)");
+            show_x();
+            return RpcResult::Error(-2, "Authentication failed");
+        }
+        Err(e) => {
+            warn!("  FAILURE: Decryption failed: {:?}", e);
+            show_x();
+            return RpcResult::Error(-3, "Decryption failed");
+        }
+    };
+
+    // Step 5: Verify plaintext matches
+    warn!("");
+    warn!("Step 5: Verifying decrypted plaintext...");
+
+    if decrypted.as_slice() == plaintext {
+        warn!("  SUCCESS: Decrypted plaintext matches original!");
+        warn!("");
+        warn!("========================================");
+        warn!("  XChaCha20-Poly1305 Demo Complete!");
+        warn!("  Encryption + Authentication Verified!");
+        warn!("========================================");
+        show_checkmark();
+        RpcResult::Bool(true)
+    } else {
+        warn!("  FAILURE: Decrypted plaintext doesn't match!");
+        show_x();
+        RpcResult::Error(-4, "Plaintext mismatch")
+    }
+}
+
 // NOTE: COSE_Sign1 demo temporarily disabled due to ML-DSA performance issues.
 // The arduino-zcbor crate with COSE support is ready and working, but ML-DSA
 // operations currently timeout (>3 minutes). Once the ML-DSA performance
@@ -866,7 +1019,9 @@ extern "C" fn rust_main() {
     warn!("║                                                              ║");
     warn!("║           ML-KEM 768 (FIPS 203)                              ║");
     warn!("║           ML-DSA 65  (FIPS 204) [performance issue]          ║");
-    warn!("║           Ed25519 (RFC 8032)                                 ║");
+    warn!("║           X-Wing (ML-KEM + X25519 Hybrid KEM)                ║");
+    warn!("║           XChaCha20-Poly1305 (AEAD Encryption)               ║");
+    warn!("║           Ed25519 / X25519 (RFC 8032/7748)                   ║");
     warn!("║           Hardware TRNG (STM32U585)                          ║");
     warn!("║                                                              ║");
     warn!("╚══════════════════════════════════════════════════════════════╝");
@@ -947,6 +1102,7 @@ extern "C" fn rust_main() {
     server.register("ed25519.run_demo", handle_ed25519_demo);
     server.register("x25519.run_demo", handle_x25519_demo);
     server.register("xwing.run_demo", handle_xwing_demo);
+    server.register("xchacha20.run_demo", handle_xchacha20_demo);
     // NOTE: cose.run_demo disabled due to ML-DSA performance issues
 
     // LED matrix control
@@ -962,6 +1118,7 @@ extern "C" fn rust_main() {
     warn!("  - ed25519.run_demo  -> Ed25519 demo (fast!)");
     warn!("  - x25519.run_demo   -> X25519 ECDH demo (fast!)");
     warn!("  - xwing.run_demo    -> X-Wing hybrid PQ KEM demo");
+    warn!("  - xchacha20.run_demo -> XChaCha20-Poly1305 AEAD demo");
     warn!("  - led_matrix.clear  -> clear LED display");
     warn!("");
     warn!("NOTE: ML-DSA operations have a known performance issue");

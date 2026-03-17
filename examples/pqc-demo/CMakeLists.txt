@@ -23,5 +23,9 @@ target_sources(app PRIVATE arduino-cryptography/c/ed25519.c)
 # This file is provided by arduino-cryptography library
 target_sources(app PRIVATE arduino-cryptography/c/x25519.c)
 
+# Add XChaCha20-Poly1305 implementation (uses mbedTLS ChaCha20-Poly1305)
+# This file is provided by arduino-cryptography library
+target_sources(app PRIVATE arduino-cryptography/c/xchacha20poly1305.c)
+
 # Build the Rust application
 rust_cargo_application()

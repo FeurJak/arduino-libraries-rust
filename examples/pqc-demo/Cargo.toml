@@ -28,7 +28,7 @@ log = "0.4"
 # Arduino libraries
 arduino-led-matrix = { path = "arduino-led-matrix" }
 arduino-rpc-bridge = { path = "arduino-rpc-bridge" }
-arduino-cryptography = { path = "arduino-cryptography", features = ["ed25519", "xwing"] }
+arduino-cryptography = { path = "arduino-cryptography", features = ["ed25519", "xwing", "xchacha20poly1305"] }
 arduino-zcbor = { path = "arduino-zcbor", features = ["cose"] }
 
 [profile.release]
