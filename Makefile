@@ -61,14 +61,30 @@ else ifeq ($(APP),rpc-server)
     LIB_NAME := arduino-led-matrix arduino-rpc-bridge
     LIB_PATH_PATTERN := ../../arduino-led-matrix ../../arduino-rpc-bridge
     MULTI_LIB := yes
+else ifeq ($(APP),mlkem-demo)
+    APP_DIR := examples/mlkem-demo
+    LIB_NAME := arduino-led-matrix arduino-rpc-bridge arduino-cryptography
+    LIB_PATH_PATTERN := ../../arduino-led-matrix ../../arduino-rpc-bridge ../../arduino-cryptography
+    MULTI_LIB := yes
+else ifeq ($(APP),pqc-demo)
+    APP_DIR := examples/pqc-demo
+    LIB_NAME := arduino-led-matrix arduino-rpc-bridge arduino-cryptography
+    LIB_PATH_PATTERN := ../../arduino-led-matrix ../../arduino-rpc-bridge ../../arduino-cryptography
+    MULTI_LIB := yes
 else ifeq ($(APP),weather-display)
     # Linux app - no MCU build needed
     LINUX_APP := yes
 else ifeq ($(APP),spi-router)
     # Linux app - no MCU build needed
     LINUX_APP := yes
+else ifeq ($(APP),mlkem-client)
+    # Linux app - no MCU build needed
+    LINUX_APP := yes
+else ifeq ($(APP),pqc-client)
+    # Linux app - no MCU build needed
+    LINUX_APP := yes
 else
-    $(error Unknown APP '$(APP)'. MCU apps: led-matrix, rpc, spi-test, rpc-server. Linux apps: weather-display, spi-router)
+    $(error Unknown APP '$(APP)'. MCU apps: led-matrix, rpc, spi-test, rpc-server, mlkem-demo, pqc-demo. Linux apps: weather-display, spi-router, mlkem-client, pqc-client)
 endif
 
 # Board configuration
@@ -190,6 +206,7 @@ else ifeq ($(MULTI_LIB),yes)
 	docker run --rm \
 		-v "$$(pwd)/arduino-led-matrix:/lib-led-matrix:ro" \
 		-v "$$(pwd)/arduino-rpc-bridge:/lib-rpc-bridge:ro" \
+		-v "$$(pwd)/arduino-cryptography:/lib-cryptography:ro" \
 		-v "$$(pwd)/$(APP_DIR):/app:ro" \
 		-v "$$(pwd)/$(OUTPUT_DIR):/output" \
 		$(IMAGE_NAME) \
@@ -200,10 +217,13 @@ else ifeq ($(MULTI_LIB),yes)
 			echo "Copying libraries..." && \
 			mkdir -p /tmp/app/arduino-led-matrix && \
 			mkdir -p /tmp/app/arduino-rpc-bridge && \
+			mkdir -p /tmp/app/arduino-cryptography && \
 			cp -r /lib-led-matrix/* /tmp/app/arduino-led-matrix/ && \
 			cp -r /lib-rpc-bridge/* /tmp/app/arduino-rpc-bridge/ && \
+			if [ -d /lib-cryptography ]; then cp -r /lib-cryptography/* /tmp/app/arduino-cryptography/ 2>/dev/null || true; fi && \
 			sed -i "s|path = \"../../arduino-led-matrix\"|path = \"arduino-led-matrix\"|" /tmp/app/Cargo.toml && \
 			sed -i "s|path = \"../../arduino-rpc-bridge\"|path = \"arduino-rpc-bridge\"|" /tmp/app/Cargo.toml && \
+			sed -i "s|path = \"../../arduino-cryptography\"|path = \"arduino-cryptography\"|" /tmp/app/Cargo.toml 2>/dev/null || true && \
 			echo "Configuring build..." && \
 			west build -p auto -b $(BOARD) /tmp/app -d /tmp/build && \
 			echo "Copying artifacts..." && \
@@ -308,8 +328,14 @@ ifeq ($(APP),weather-display)
 else ifeq ($(APP),spi-router)
 	cd arduino-spi-router && cargo zigbuild --target $(LINUX_TARGET) --release
 	@echo "$(GREEN)Build complete: arduino-spi-router/target/$(LINUX_TARGET)/release/spi-router$(NC)"
+else ifeq ($(APP),mlkem-client)
+	cd examples/mlkem-client && cargo zigbuild --target $(LINUX_TARGET) --release
+	@echo "$(GREEN)Build complete: examples/mlkem-client/target/$(LINUX_TARGET)/release/mlkem-client$(NC)"
+else ifeq ($(APP),pqc-client)
+	cd examples/pqc-client && cargo zigbuild --target $(LINUX_TARGET) --release
+	@echo "$(GREEN)Build complete: examples/pqc-client/target/$(LINUX_TARGET)/release/pqc-client$(NC)"
 else
-	$(error Unknown Linux APP '$(APP)'. Use APP=weather-display or APP=spi-router)
+	$(error Unknown Linux APP '$(APP)'. Use APP=weather-display, APP=spi-router, APP=mlkem-client, or APP=pqc-client)
 endif
 
 # Deploy a Linux application to the board
@@ -323,8 +349,16 @@ else ifeq ($(APP),spi-router)
 	@test -f arduino-spi-router/target/$(LINUX_TARGET)/release/spi-router || { echo "$(RED)Error: Binary not found. Run 'make build-linux APP=spi-router' first.$(NC)"; exit 1; }
 	sshpass -p '$(BOARD_PASS)' scp arduino-spi-router/target/$(LINUX_TARGET)/release/spi-router $(BOARD_USER)@$(BOARD_IP):/home/$(BOARD_USER)/
 	@echo "$(GREEN)Deployed to /home/$(BOARD_USER)/spi-router$(NC)"
+else ifeq ($(APP),mlkem-client)
+	@test -f examples/mlkem-client/target/$(LINUX_TARGET)/release/mlkem-client || { echo "$(RED)Error: Binary not found. Run 'make build-linux APP=mlkem-client' first.$(NC)"; exit 1; }
+	sshpass -p '$(BOARD_PASS)' scp examples/mlkem-client/target/$(LINUX_TARGET)/release/mlkem-client $(BOARD_USER)@$(BOARD_IP):/home/$(BOARD_USER)/
+	@echo "$(GREEN)Deployed to /home/$(BOARD_USER)/mlkem-client$(NC)"
+else ifeq ($(APP),pqc-client)
+	@test -f examples/pqc-client/target/$(LINUX_TARGET)/release/pqc-client || { echo "$(RED)Error: Binary not found. Run 'make build-linux APP=pqc-client' first.$(NC)"; exit 1; }
+	sshpass -p '$(BOARD_PASS)' scp examples/pqc-client/target/$(LINUX_TARGET)/release/pqc-client $(BOARD_USER)@$(BOARD_IP):/home/$(BOARD_USER)/
+	@echo "$(GREEN)Deployed to /home/$(BOARD_USER)/pqc-client$(NC)"
 else
-	$(error Unknown Linux APP '$(APP)'. Use APP=weather-display or APP=spi-router)
+	$(error Unknown Linux APP '$(APP)'. Use APP=weather-display, APP=spi-router, APP=mlkem-client, or APP=pqc-client)
 endif
 
 # Run a Linux application on the board
@@ -333,8 +367,12 @@ run-linux: check-ssh
 	@echo "$(CYAN)Running $(APP) on board...$(NC)"
 ifeq ($(APP),weather-display)
 	sshpass -p '$(BOARD_PASS)' ssh $(BOARD_USER)@$(BOARD_IP) "RUST_LOG=info /home/$(BOARD_USER)/weather-display $(ARGS)"
+else ifeq ($(APP),mlkem-client)
+	sshpass -p '$(BOARD_PASS)' ssh $(BOARD_USER)@$(BOARD_IP) "RUST_LOG=info /home/$(BOARD_USER)/mlkem-client $(ARGS)"
+else ifeq ($(APP),pqc-client)
+	sshpass -p '$(BOARD_PASS)' ssh $(BOARD_USER)@$(BOARD_IP) "RUST_LOG=info /home/$(BOARD_USER)/pqc-client $(ARGS)"
 else
-	$(error Unknown Linux APP '$(APP)' for run-linux. Use APP=weather-display)
+	$(error Unknown Linux APP '$(APP)' for run-linux. Use APP=weather-display, APP=mlkem-client, or APP=pqc-client)
 endif
 
 # Build and deploy Linux app in one step

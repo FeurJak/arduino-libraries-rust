@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+#
+# ML-KEM Demo - Post-quantum key exchange demonstration
+# MCU firmware for Arduino Uno Q
+
+[package]
+# Zephyr requires the package name to be "rustapp"
+name = "rustapp"
+version = "0.1.0"
+edition = "2021"
+description = "ML-KEM post-quantum key exchange demo for Arduino Uno Q"
+license = "Apache-2.0 OR MIT"
+authors = ["Arduino Rust Team"]
+
+[lib]
+crate-type = ["staticlib"]
+path = "src/lib.rs"
+
+[dependencies]
+# Zephyr RTOS bindings
+zephyr = "0.1.0"
+log = "0.4"
+
+# Arduino libraries
+arduino-led-matrix = { path = "arduino-led-matrix" }
+arduino-rpc-bridge = { path = "arduino-rpc-bridge" }
+arduino-cryptography = { path = "arduino-cryptography" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+debug = false

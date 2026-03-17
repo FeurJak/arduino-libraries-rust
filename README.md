@@ -85,6 +85,17 @@ Linux-side RPC client library for calling MCU methods.
 - Call MCU methods (LED matrix, GPIO, etc.)
 - Async and sync APIs
 
+### arduino-cryptography (MCU)
+
+Post-quantum cryptography library for the MCU, providing ML-KEM (FIPS 203) key encapsulation.
+
+**Features:**
+
+- ML-KEM 768 (NIST Level 3 security)
+- Formally verified implementation via [libcrux-iot](https://github.com/cryspen/libcrux-iot)
+- Quantum-resistant key exchange
+- no_std compatible
+
 ## Examples
 
 ### led-matrix-demo (MCU)
@@ -102,6 +113,10 @@ RPC server that exposes LED matrix control via SPI. **Required for weather-displ
 ### weather-display (Linux)
 
 Complete application that fetches weather data from Open-Meteo API and displays temperature and weather icons on the LED matrix via RPC.
+
+### mlkem-demo (MCU) + mlkem-client (Linux)
+
+Post-quantum key exchange demonstration using ML-KEM 768 between MCU and Linux.
 
 ## Requirements
 
@@ -203,13 +218,16 @@ client.call("led_matrix.set_pixel", vec![
 arduino-libraries-rust/
 ├── arduino-led-matrix/          # MCU: LED Matrix library
 ├── arduino-rpc-bridge/          # MCU: RPC library (no_std)
+├── arduino-cryptography/        # MCU: Post-quantum crypto (ML-KEM)
 ├── arduino-spi-router/          # Linux: SPI router daemon
 ├── arduino-rpc-client/          # Linux: RPC client library
 ├── examples/
 │   ├── led-matrix-demo/         # MCU: LED matrix demo
 │   ├── spi-test/                # MCU: SPI communication test
 │   ├── rpc-server/              # MCU: RPC server example
-│   └── weather-display/         # Linux: Weather on LED matrix
+│   ├── mlkem-demo/              # MCU: ML-KEM crypto demo
+│   ├── weather-display/         # Linux: Weather on LED matrix
+│   └── mlkem-client/            # Linux: ML-KEM client
 ├── docker/
 │   └── Dockerfile               # Build environment
 ├── Makefile

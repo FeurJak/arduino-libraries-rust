@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+#
+# Arduino Cryptography Library
+# Post-quantum cryptography for Arduino Uno Q (STM32U585 MCU)
+
+[package]
+name = "arduino-cryptography"
+version = "0.1.0"
+edition = "2021"
+description = "Post-quantum cryptography library for Arduino Uno Q"
+license = "Apache-2.0 OR MIT"
+authors = ["Arduino Rust Team"]
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# ML-KEM implementation from libcrux-iot (no_std, optimized for embedded)
+# Forked from https://github.com/cryspen/libcrux-iot
+libcrux-iot-ml-kem = { git = "https://github.com/FeurJak/libcrux-iot", default-features = false, features = ["mlkem768"] }
+
+# ML-DSA implementation from libcrux-iot (no_std, optimized for embedded)
+libcrux-iot-ml-dsa = { git = "https://github.com/FeurJak/libcrux-iot", default-features = false, features = ["mldsa65"] }
+
+# SHA3 for hashing (required by ML-KEM and ML-DSA)
+libcrux-iot-sha3 = { git = "https://github.com/FeurJak/libcrux-iot" }
+
+# Secrets handling for ML-DSA (classified bytes)
+libcrux-secrets = "0.0.5"
+
+[features]
+default = ["mlkem768", "mldsa65"]
+
+# ML-KEM parameter sets
+mlkem512 = ["libcrux-iot-ml-kem/mlkem512"]
+mlkem768 = ["libcrux-iot-ml-kem/mlkem768"]
+mlkem1024 = ["libcrux-iot-ml-kem/mlkem1024"]
+
+# ML-DSA parameter sets
+mldsa44 = ["libcrux-iot-ml-dsa/mldsa44"]
+mldsa65 = ["libcrux-iot-ml-dsa/mldsa65"]
+mldsa87 = ["libcrux-iot-ml-dsa/mldsa87"]
