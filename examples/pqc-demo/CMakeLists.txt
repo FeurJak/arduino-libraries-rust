@@ -11,5 +11,9 @@ target_sources(app PRIVATE src/c/spi_peripheral.c)
 # Add the LED matrix C driver
 target_sources(app PRIVATE src/c/matrix.c)
 
+# Add the hardware RNG wrapper for Rust FFI
+# This file is provided by arduino-cryptography library
+target_sources(app PRIVATE arduino-cryptography/c/hwrng.c)
+
 # Build the Rust application
 rust_cargo_application()

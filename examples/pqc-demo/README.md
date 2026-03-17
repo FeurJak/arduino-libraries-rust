@@ -6,6 +6,7 @@ This example demonstrates post-quantum cryptographic operations running entirely
 
 - **ML-KEM 768**: Post-quantum key encapsulation mechanism (NIST Level 3)
 - **ML-DSA 65**: Post-quantum digital signatures (NIST Level 3)
+- **Hardware TRNG**: Uses STM32U585's True Random Number Generator for cryptographic randomness
 - **Self-Contained**: All crypto runs on-device, no binary data transfer needed
 - **Visual Feedback**: LED matrix displays operation status in real-time
 
@@ -79,7 +80,7 @@ Note: ML-DSA operations are computationally intensive and take >60 seconds on th
 
 ### Core
 - `ping` - Returns "pong"
-- `version` - Returns firmware version ("pqc-demo 0.2.0")
+- `version` - Returns firmware version ("pqc-demo 0.3.0-hwrng")
 - `led_matrix.clear` - Clear the LED display
 
 ## Algorithm Parameters
@@ -108,13 +109,45 @@ Note: ML-DSA operations are computationally intensive and take >60 seconds on th
 
 - Stack: 48KB (configured in prj.conf)
 - Heap: 32KB
-- Flash: ~226KB
+- Flash: ~227KB
 
 ## Implementation Notes
 
 - Uses [libcrux-iot](https://github.com/cryspen/libcrux-iot) for formally verified PQC implementations
-- Simple PRNG used for demo (production should use STM32U585 hardware RNG)
+- **Hardware TRNG**: Uses STM32U585's True Random Number Generator via Zephyr's entropy API for cryptographically secure randomness during key generation
 - ML-DSA verification skipped in demo for speed (signing proves the implementation works)
+
+## Hardware RNG Integration
+
+The demo uses the STM32U585's hardware True Random Number Generator (TRNG) for all cryptographic operations via the `arduino_cryptography::rng::HwRng` module:
+
+- **Key Generation**: ML-KEM requires 64 bytes of randomness, ML-DSA requires 32 bytes
+- **Encapsulation**: ML-KEM encapsulation requires 32 bytes of randomness  
+- **Signing**: ML-DSA signing requires 32 bytes of randomness
+
+### Setup Requirements
+
+1. **Kconfig** (`prj.conf`):
+   ```
+   CONFIG_ENTROPY_GENERATOR=y
+   CONFIG_ENTROPY_DEVICE_RANDOM_GENERATOR=y
+   ```
+
+2. **CMakeLists.txt** - Include the C wrapper:
+   ```cmake
+   target_sources(app PRIVATE arduino-cryptography/c/hwrng.c)
+   ```
+
+3. **Rust code** - Import and use:
+   ```rust
+   use arduino_cryptography::{kem, rng::HwRng};
+   
+   let rng = HwRng::new();
+   let seed: [u8; kem::KEYGEN_SEED_SIZE] = rng.random_array();
+   let keypair = kem::generate_key_pair(seed);
+   ```
+
+See `arduino-cryptography/README.md` for full documentation.
 
 ## Troubleshooting
 
@@ -128,7 +161,7 @@ make flash APP=pqc-demo
 Ensure you flashed `pqc-demo`, not `rpc-server`. Check with:
 ```bash
 make pqc-ping
-# Should show: pqc-demo 0.2.0
+# Should show: pqc-demo 0.3.0-hwrng
 ```
 
 ## License

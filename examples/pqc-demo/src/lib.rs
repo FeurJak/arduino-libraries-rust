@@ -29,7 +29,7 @@
 
 use log::warn;
 
-use arduino_cryptography::{dsa, kem};
+use arduino_cryptography::{dsa, kem, rng::HwRng};
 use arduino_led_matrix::{Frame, LedMatrix};
 use arduino_rpc_bridge::{RpcResult, RpcServer, SpiTransport, Transport};
 use zephyr::time::{sleep, Duration};
@@ -40,36 +40,6 @@ static mut MATRIX: Option<LedMatrix> = None;
 /// Get mutable reference to the global matrix
 unsafe fn matrix() -> &'static mut LedMatrix {
     MATRIX.as_mut().expect("Matrix not initialized")
-}
-
-/// Simple pseudo-random number generator
-/// In production, use hardware RNG from Zephyr
-struct SimpleRng {
-    state: u64,
-}
-
-impl SimpleRng {
-    fn new(seed: u64) -> Self {
-        Self { state: seed }
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        // xorshift64
-        self.state ^= self.state << 13;
-        self.state ^= self.state >> 7;
-        self.state ^= self.state << 17;
-        self.state
-    }
-
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        for chunk in dest.chunks_mut(8) {
-            let val = self.next_u64();
-            let bytes = val.to_le_bytes();
-            for (i, b) in chunk.iter_mut().enumerate() {
-                *b = bytes[i];
-            }
-        }
-    }
 }
 
 // === LED Matrix Patterns ===
@@ -191,7 +161,7 @@ fn handle_ping(_count: usize) -> RpcResult {
 
 /// Handle version request
 fn handle_version(_count: usize) -> RpcResult {
-    RpcResult::Str("pqc-demo 0.2.0")
+    RpcResult::Str("pqc-demo 0.3.0-hwrng")
 }
 
 /// Run complete ML-KEM demo on-device
@@ -200,17 +170,20 @@ fn handle_mlkem_demo(_count: usize) -> RpcResult {
     warn!("");
     warn!("========================================");
     warn!("  ML-KEM 768 Demo (FIPS 203)");
+    warn!("  Using Hardware TRNG for randomness");
     warn!("========================================");
     warn!("");
 
+    // Initialize hardware RNG (uses STM32U585 TRNG)
+    let rng = HwRng::new();
+
     // Step 1: Generate key pair
     warn!("Step 1: Generating ML-KEM 768 key pair...");
+    warn!("  (Using hardware TRNG for randomness)");
     show_key();
     sleep(Duration::millis_at_least(500));
 
-    let mut rng = SimpleRng::new(0x12345678_9ABCDEF0);
-    let mut keygen_randomness = [0u8; kem::KEYGEN_SEED_SIZE];
-    rng.fill_bytes(&mut keygen_randomness);
+    let keygen_randomness: [u8; kem::KEYGEN_SEED_SIZE] = rng.random_array();
 
     let key_pair = kem::generate_key_pair(keygen_randomness);
     warn!("  Public key:  {} bytes", kem::PUBLIC_KEY_SIZE);
@@ -223,8 +196,7 @@ fn handle_mlkem_demo(_count: usize) -> RpcResult {
     show_lock();
     sleep(Duration::millis_at_least(500));
 
-    let mut encaps_randomness = [0u8; kem::ENCAPS_SEED_SIZE];
-    rng.fill_bytes(&mut encaps_randomness);
+    let encaps_randomness: [u8; kem::ENCAPS_SEED_SIZE] = rng.random_array();
 
     let (ciphertext, shared_secret_sender) =
         kem::encapsulate(key_pair.public_key(), encaps_randomness);
@@ -292,17 +264,20 @@ fn handle_mldsa_demo(_count: usize) -> RpcResult {
     warn!("");
     warn!("========================================");
     warn!("  ML-DSA 65 Demo (FIPS 204)");
+    warn!("  Using Hardware TRNG for randomness");
     warn!("========================================");
     warn!("");
 
+    // Initialize hardware RNG (uses STM32U585 TRNG)
+    let rng = HwRng::new();
+
     // Step 1: Generate key pair
     warn!("Step 1: Generating ML-DSA 65 key pair...");
+    warn!("  (Using hardware TRNG for randomness)");
     show_key();
     sleep(Duration::millis_at_least(300));
 
-    let mut rng = SimpleRng::new(0xDEADBEEF_CAFEBABE);
-    let mut keygen_randomness = [0u8; dsa::KEYGEN_RANDOMNESS_SIZE];
-    rng.fill_bytes(&mut keygen_randomness);
+    let keygen_randomness: [u8; dsa::KEYGEN_RANDOMNESS_SIZE] = rng.random_array();
 
     let key_pair = dsa::generate_key_pair(keygen_randomness);
     warn!("  Verification key: {} bytes", dsa::VERIFICATION_KEY_SIZE);
@@ -318,8 +293,7 @@ fn handle_mldsa_demo(_count: usize) -> RpcResult {
     let message = b"Hello from Arduino Uno Q!";
     let context: &[u8] = b"";
 
-    let mut sign_randomness = [0u8; dsa::SIGNING_RANDOMNESS_SIZE];
-    rng.fill_bytes(&mut sign_randomness);
+    let sign_randomness: [u8; dsa::SIGNING_RANDOMNESS_SIZE] = rng.random_array();
 
     match dsa::sign(&key_pair.signing_key, message, context, sign_randomness) {
         Ok(signature) => {
@@ -353,8 +327,14 @@ fn handle_pqc_demo(_count: usize) -> RpcResult {
     warn!("║                                                              ║");
     warn!("║   ML-KEM 768 (FIPS 203) + ML-DSA 65 (FIPS 204)              ║");
     warn!("║   Running on Arduino Uno Q (STM32U585 MCU)                   ║");
+    warn!("║   Using Hardware TRNG for cryptographic randomness          ║");
     warn!("║                                                              ║");
     warn!("╚══════════════════════════════════════════════════════════════╝");
+    warn!("");
+
+    // Initialize hardware RNG (uses STM32U585 TRNG)
+    let rng = HwRng::new();
+    warn!("Hardware TRNG initialized");
     warn!("");
 
     // ==========================================
@@ -367,12 +347,11 @@ fn handle_pqc_demo(_count: usize) -> RpcResult {
 
     // Step 1.1: Generate ML-KEM key pair
     warn!("  [1.1] Generating ML-KEM 768 key pair...");
+    warn!("        (Using hardware TRNG for randomness)");
     show_key();
     sleep(Duration::millis_at_least(600));
 
-    let mut rng = SimpleRng::new(0x12345678_9ABCDEF0);
-    let mut kem_keygen_rand = [0u8; kem::KEYGEN_SEED_SIZE];
-    rng.fill_bytes(&mut kem_keygen_rand);
+    let kem_keygen_rand: [u8; kem::KEYGEN_SEED_SIZE] = rng.random_array();
 
     let kem_keypair = kem::generate_key_pair(kem_keygen_rand);
     warn!("        Public key:  {} bytes", kem::PUBLIC_KEY_SIZE);
@@ -384,8 +363,7 @@ fn handle_pqc_demo(_count: usize) -> RpcResult {
     show_lock();
     sleep(Duration::millis_at_least(400));
 
-    let mut encaps_rand = [0u8; kem::ENCAPS_SEED_SIZE];
-    rng.fill_bytes(&mut encaps_rand);
+    let encaps_rand: [u8; kem::ENCAPS_SEED_SIZE] = rng.random_array();
 
     let (ciphertext, shared_secret_enc) = kem::encapsulate(kem_keypair.public_key(), encaps_rand);
     warn!("        Ciphertext:    {} bytes", kem::CIPHERTEXT_SIZE);
@@ -429,20 +407,13 @@ fn handle_pqc_demo(_count: usize) -> RpcResult {
     warn!("└──────────────────────────────────────────────────────────────┘");
     warn!("");
 
-    // Step 2.1: Generate ML-DSA key pair (seeded from shared secret for demo)
+    // Step 2.1: Generate ML-DSA key pair
     warn!("  [2.1] Generating ML-DSA 65 key pair...");
+    warn!("        (Using hardware TRNG for randomness)");
     show_key();
     sleep(Duration::millis_at_least(600));
 
-    // Use first 8 bytes of shared secret as seed for deterministic demo
-    let mut seed = 0u64;
-    for (i, &b) in enc_bytes.iter().take(8).enumerate() {
-        seed |= (b as u64) << (i * 8);
-    }
-    let mut dsa_rng = SimpleRng::new(seed);
-
-    let mut dsa_keygen_rand = [0u8; dsa::KEYGEN_RANDOMNESS_SIZE];
-    dsa_rng.fill_bytes(&mut dsa_keygen_rand);
+    let dsa_keygen_rand: [u8; dsa::KEYGEN_RANDOMNESS_SIZE] = rng.random_array();
 
     let dsa_keypair = dsa::generate_key_pair(dsa_keygen_rand);
     warn!(
@@ -460,8 +431,7 @@ fn handle_pqc_demo(_count: usize) -> RpcResult {
     let message = b"Quantum-safe message from Arduino Uno Q";
     let context: &[u8] = b"pqc-demo-v2";
 
-    let mut sign_rand = [0u8; dsa::SIGNING_RANDOMNESS_SIZE];
-    dsa_rng.fill_bytes(&mut sign_rand);
+    let sign_rand: [u8; dsa::SIGNING_RANDOMNESS_SIZE] = rng.random_array();
 
     match dsa::sign(&dsa_keypair.signing_key, message, context, sign_rand) {
         Ok(_signature) => {
@@ -518,6 +488,7 @@ extern "C" fn rust_main() {
     warn!("║                                                              ║");
     warn!("║           ML-KEM 768 (FIPS 203)                              ║");
     warn!("║           ML-DSA 65  (FIPS 204)                              ║");
+    warn!("║           Hardware TRNG (STM32U585)                          ║");
     warn!("║                                                              ║");
     warn!("╚══════════════════════════════════════════════════════════════╝");
     warn!("");

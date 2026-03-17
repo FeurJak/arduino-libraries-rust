@@ -32,3 +32,8 @@
  * LED Matrix pin mapping (from ArduinoCore-zephyr):
  *   PF0-PF10: 11 charlieplex control pins for 104 LEDs
  */
+
+/* Enable hardware True Random Number Generator for PQC operations */
+&rng {
+	status = "okay";
+};

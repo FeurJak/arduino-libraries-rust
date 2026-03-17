@@ -5,6 +5,7 @@
 // Provides post-quantum cryptographic primitives for the Arduino Uno Q:
 // - ML-KEM (FIPS 203) for key encapsulation
 // - ML-DSA (FIPS 204) for digital signatures
+// - Hardware RNG integration via Zephyr's entropy API
 //
 // This library wraps libcrux-iot for embedded use on the STM32U585 MCU.
 
@@ -12,6 +13,12 @@
 
 // Re-export libcrux_secrets for classified byte handling
 pub use libcrux_secrets;
+
+/// Hardware Random Number Generator using Zephyr's entropy subsystem.
+///
+/// Provides cryptographically secure randomness from the STM32U585's TRNG.
+/// See the module documentation for setup requirements.
+pub mod rng;
 
 /// Re-export ML-KEM types and functions
 pub mod mlkem {
