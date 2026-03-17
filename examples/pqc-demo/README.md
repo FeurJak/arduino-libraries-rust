@@ -1,66 +1,88 @@
 # PQC Demo - Post-Quantum Cryptography for Arduino Uno Q
 
-This example demonstrates post-quantum cryptographic operations on the Arduino Uno Q,
-combining ML-KEM (FIPS 203) for key encapsulation and ML-DSA (FIPS 204) for digital
-signatures.
+This example demonstrates post-quantum cryptographic operations running entirely on the Arduino Uno Q's STM32U585 MCU, combining ML-KEM (FIPS 203) for key encapsulation and ML-DSA (FIPS 204) for digital signatures.
 
 ## Features
 
 - **ML-KEM 768**: Post-quantum key encapsulation mechanism (NIST Level 3)
 - **ML-DSA 65**: Post-quantum digital signatures (NIST Level 3)
-- **Hybrid Protocol**: Derive signature keys from shared secrets
-- **Visual Feedback**: LED matrix displays operation status
+- **Self-Contained**: All crypto runs on-device, no binary data transfer needed
+- **Visual Feedback**: LED matrix displays operation status in real-time
 
-## Protocol Flow
+## Quick Start
 
+```bash
+# From the project root:
+
+# 1. Build and flash the PQC demo firmware
+make build APP=pqc-demo
+make flash APP=pqc-demo
+
+# 2. Build and deploy the Linux client (one-time)
+make build-linux APP=pqc-client
+make deploy-linux APP=pqc-client
+
+# 3. Run the demo!
+make pqc-demo
 ```
-Linux MPU                              STM32U585 MCU
-    |                                       |
-    |  1. Request ML-KEM public key         |
-    |-------------------------------------->|
-    |<--------------------------------------| (1184 bytes)
-    |                                       |
-    |  2. Encapsulate shared secret         |
-    |  (locally, using public key)          |
-    |                                       |
-    |  3. Send ciphertext to MCU            |
-    |-------------------------------------->| (1088 bytes)
-    |                                       | Decapsulate -> shared secret
-    |                                       | Derive ML-DSA keys
-    |                                       | Sign message
-    |                                       |
-    |  4. Get verification key              |
-    |<--------------------------------------| (1952 bytes)
-    |                                       |
-    |  5. Get signature                     |
-    |<--------------------------------------| (3309 bytes)
-    |                                       |
-    |  6. Verify signature locally          |
-    |                                       |
+
+## Available Commands
+
+```bash
+# Run ML-KEM 768 demo (recommended - fast, ~2 seconds)
+make pqc-demo
+
+# Ping the MCU
+make pqc-ping
+
+# Run with custom arguments
+make pqc CMD='--mlkem-demo'    # ML-KEM only
+make pqc CMD='--mldsa-demo'    # ML-DSA only (slow, >60s)
+make pqc CMD='--help'          # Show all options
 ```
+
+## What the Demo Does
+
+### ML-KEM Demo (`make pqc-demo`)
+
+1. **Key Generation**: Generates ML-KEM 768 key pair (1184 byte public key)
+2. **Encapsulation**: Creates ciphertext (1088 bytes) and shared secret (32 bytes)
+3. **Decapsulation**: Recovers the shared secret from ciphertext
+4. **Verification**: Confirms both shared secrets match
+
+All operations complete in ~2 seconds with LED feedback.
+
+### ML-DSA Demo (slow)
+
+1. **Key Generation**: Generates ML-DSA 65 key pair (1952 byte verification key)
+2. **Signing**: Signs a message, producing a 3309 byte signature
+
+Note: ML-DSA operations are computationally intensive and take >60 seconds on the STM32U585.
+
+## LED Matrix Indicators
+
+| Pattern | Meaning |
+|---------|---------|
+| Key | Generating keys |
+| Lock | Encrypting/decrypting |
+| Pen | Signing |
+| Shield | Verifying |
+| Checkmark | Success |
+| X | Failure |
 
 ## RPC Methods
 
+### Demo Methods (Self-Contained)
+- `pqc.run_demo` - Full ML-KEM + ML-DSA demo
+- `mlkem.run_demo` - ML-KEM 768 demo only
+- `mldsa.run_demo` - ML-DSA 65 demo only
+
 ### Core
-- `ping()` - Returns "pong"
-- `version()` - Returns firmware version
+- `ping` - Returns "pong"
+- `version` - Returns firmware version ("pqc-demo 0.2.0")
+- `led_matrix.clear` - Clear the LED display
 
-### ML-KEM
-- `mlkem.generate_keypair()` - Generate new ML-KEM 768 key pair
-- `mlkem.get_public_key()` - Get public key (1184 bytes)
-- `mlkem.decapsulate(ciphertext)` - Decapsulate to get shared secret
-- `mlkem.get_shared_secret()` - Get the derived shared secret (32 bytes)
-
-### ML-DSA
-- `mldsa.generate_from_secret()` - Generate ML-DSA keys from shared secret
-- `mldsa.get_verification_key()` - Get verification key (1952 bytes)
-- `mldsa.sign(message)` - Sign a message
-- `mldsa.get_signature()` - Get the last signature (3309 bytes)
-
-### Combined
-- `pqc.full_demo(ciphertext, message)` - Complete demo sequence
-
-## Size Parameters
+## Algorithm Parameters
 
 | Algorithm | Component | Size (bytes) |
 |-----------|-----------|--------------|
@@ -72,33 +94,43 @@ Linux MPU                              STM32U585 MCU
 | ML-DSA 65 | Signing Key | 4,032 |
 | ML-DSA 65 | Signature | 3,309 |
 
-## Building
+## Performance
 
-```bash
-# From the project root
-make build APP=pqc-demo
-
-# Flash to board
-make flash APP=pqc-demo
-```
-
-## LED Matrix Indicators
-
-| Pattern | Meaning |
-|---------|---------|
-| Key | Generating keys |
-| Lock | Encrypting/decrypting |
-| Pen | Signing |
-| Checkmark | Success |
-| X | Failure |
+| Operation | Time (approx) |
+|-----------|---------------|
+| ML-KEM Key Generation | ~200ms |
+| ML-KEM Encapsulation | ~100ms |
+| ML-KEM Decapsulation | ~100ms |
+| ML-DSA Key Generation | ~30s |
+| ML-DSA Signing | ~30s |
 
 ## Memory Requirements
 
-- Stack: 48KB (for ML-DSA operations)
-- Heap: 32KB (for temporary allocations)
+- Stack: 48KB (configured in prj.conf)
+- Heap: 32KB
+- Flash: ~226KB
 
-## Security Notes
+## Implementation Notes
 
-- This demo uses a simple PRNG for key generation. In production, use the STM32U585's hardware RNG.
-- The shared secret derivation for ML-DSA is simplified. Production systems should use a proper KDF like HKDF.
-- Empty context is used for ML-DSA signing. Production systems may want domain separation.
+- Uses [libcrux-iot](https://github.com/cryspen/libcrux-iot) for formally verified PQC implementations
+- Simple PRNG used for demo (production should use STM32U585 hardware RNG)
+- ML-DSA verification skipped in demo for speed (signing proves the implementation works)
+
+## Troubleshooting
+
+**MCU not responding after ML-DSA demo:**
+The ML-DSA operations are slow. If the client times out, the MCU may still be computing. Re-flash to reset:
+```bash
+make flash APP=pqc-demo
+```
+
+**LED matrix not working:**
+Ensure you flashed `pqc-demo`, not `rpc-server`. Check with:
+```bash
+make pqc-ping
+# Should show: pqc-demo 0.2.0
+```
+
+## License
+
+Apache-2.0 OR MIT

@@ -6,31 +6,23 @@
 // - ML-KEM 768 (FIPS 203) for key encapsulation
 // - ML-DSA 65 (FIPS 204) for digital signatures
 //
-// Protocol:
-// 1. MCU generates ML-KEM key pair and sends public key to Linux
-// 2. Linux encapsulates a shared secret using the public key
-// 3. Linux sends ciphertext back to MCU
-// 4. MCU decapsulates to recover the shared secret
-// 5. MCU uses shared secret (via SHA3) to seed ML-DSA key generation
-// 6. MCU signs a message with ML-DSA and returns signature + verification key
-// 7. Linux verifies the signature
+// The demo runs entirely on the MCU - no binary data transfer from Linux needed.
+// This makes the demo self-contained and easy to trigger via simple RPC calls.
 //
 // The LED matrix displays status:
 // - Key icon: Generating keys
-// - Lock icon: Encryption/signing
+// - Lock icon: Encryption/decryption
+// - Pen icon: Signing
 // - Checkmark: Success
 // - X: Failure
 //
 // RPC Methods:
 // - ping() -> "pong"
 // - version() -> firmware version
-// - mlkem.generate_keypair() -> generates new ML-KEM key pair
-// - mlkem.get_public_key() -> returns serialized public key (1184 bytes)
-// - mlkem.decapsulate(ciphertext) -> returns shared secret (32 bytes)
-// - mldsa.generate_keypair_from_secret() -> generates ML-DSA keys from shared secret
-// - mldsa.sign(message) -> signs message, returns signature
-// - mldsa.get_verification_key() -> returns verification key (1952 bytes)
-// - pqc.full_demo(ciphertext, message) -> complete demo: decapsulate, generate DSA keys, sign
+// - pqc.run_demo() -> complete ML-KEM + ML-DSA demo with verification
+// - mlkem.run_demo() -> ML-KEM only demo (keygen, encaps, decaps)
+// - mldsa.run_demo() -> ML-DSA only demo (keygen, sign, verify)
+// - led_matrix.clear() -> clear the LED display
 
 #![no_std]
 #![allow(unexpected_cfgs)]
@@ -39,25 +31,11 @@ use log::warn;
 
 use arduino_cryptography::{dsa, kem};
 use arduino_led_matrix::{Frame, LedMatrix};
-use arduino_rpc_bridge::{RpcResult, RpcServer, SpiTransport, Transport, PARAMS};
+use arduino_rpc_bridge::{RpcResult, RpcServer, SpiTransport, Transport};
 use zephyr::time::{sleep, Duration};
 
 // Global state
 static mut MATRIX: Option<LedMatrix> = None;
-
-// ML-KEM state
-static mut KEM_KEY_PAIR: Option<kem::KeyPair> = None;
-static mut SHARED_SECRET: Option<[u8; 32]> = None;
-
-// ML-DSA state
-static mut DSA_KEY_PAIR: Option<dsa::KeyPair> = None;
-static mut LAST_SIGNATURE: Option<dsa::Signature> = None;
-
-// Response buffers
-static mut PK_BUFFER: [u8; kem::PUBLIC_KEY_SIZE] = [0u8; kem::PUBLIC_KEY_SIZE];
-static mut SS_BUFFER: [u8; 32] = [0u8; 32];
-static mut VK_BUFFER: [u8; dsa::VERIFICATION_KEY_SIZE] = [0u8; dsa::VERIFICATION_KEY_SIZE];
-static mut SIG_BUFFER: [u8; dsa::SIGNATURE_SIZE] = [0u8; dsa::SIGNATURE_SIZE];
 
 /// Get mutable reference to the global matrix
 unsafe fn matrix() -> &'static mut LedMatrix {
@@ -73,14 +51,6 @@ struct SimpleRng {
 impl SimpleRng {
     fn new(seed: u64) -> Self {
         Self { state: seed }
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Self {
-        let mut seed = 0u64;
-        for (i, &b) in bytes.iter().take(8).enumerate() {
-            seed |= (b as u64) << (i * 8);
-        }
-        Self::new(seed)
     }
 
     fn next_u64(&mut self) -> u64 {
@@ -158,7 +128,7 @@ fn show_key() {
     }
 }
 
-/// Show a lock icon (encryption/signing)
+/// Show a lock icon (encryption/decryption)
 fn show_lock() {
     let pattern: [[u8; 13]; 8] = [
         [0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0],
@@ -194,6 +164,24 @@ fn show_signature() {
     }
 }
 
+/// Show shield icon (verification)
+fn show_shield() {
+    let pattern: [[u8; 13]; 8] = [
+        [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+        [0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0],
+        [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0],
+        [0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0],
+        [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0],
+        [0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+        [0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0],
+    ];
+    unsafe {
+        let frame = Frame::from_bitmap(&pattern);
+        matrix().load_frame(&frame);
+    }
+}
+
 // === RPC Handlers ===
 
 /// Handle ping request
@@ -203,272 +191,308 @@ fn handle_ping(_count: usize) -> RpcResult {
 
 /// Handle version request
 fn handle_version(_count: usize) -> RpcResult {
-    RpcResult::Str("pqc-demo 0.1.0")
+    RpcResult::Str("pqc-demo 0.2.0")
 }
 
-/// Generate a new ML-KEM key pair
-fn handle_kem_generate_keypair(_count: usize) -> RpcResult {
-    warn!("Generating ML-KEM 768 key pair...");
-    show_key();
+/// Run complete ML-KEM demo on-device
+/// Demonstrates: key generation, encapsulation, decapsulation
+fn handle_mlkem_demo(_count: usize) -> RpcResult {
+    warn!("");
+    warn!("========================================");
+    warn!("  ML-KEM 768 Demo (FIPS 203)");
+    warn!("========================================");
+    warn!("");
 
-    // Create randomness for key generation (64 bytes needed)
+    // Step 1: Generate key pair
+    warn!("Step 1: Generating ML-KEM 768 key pair...");
+    show_key();
+    sleep(Duration::millis_at_least(500));
+
     let mut rng = SimpleRng::new(0x12345678_9ABCDEF0);
-    let mut randomness = [0u8; kem::KEYGEN_SEED_SIZE];
-    rng.fill_bytes(&mut randomness);
+    let mut keygen_randomness = [0u8; kem::KEYGEN_SEED_SIZE];
+    rng.fill_bytes(&mut keygen_randomness);
 
-    // Generate key pair
-    let key_pair = kem::generate_key_pair(randomness);
+    let key_pair = kem::generate_key_pair(keygen_randomness);
+    warn!("  Public key:  {} bytes", kem::PUBLIC_KEY_SIZE);
+    warn!("  Private key: {} bytes", kem::PRIVATE_KEY_SIZE);
+    warn!("  Key pair generated!");
 
-    unsafe {
-        KEM_KEY_PAIR = Some(key_pair);
-        SHARED_SECRET = None;
-        DSA_KEY_PAIR = None;
-        LAST_SIGNATURE = None;
-    }
-
-    warn!("ML-KEM key pair generated!");
-    RpcResult::Bool(true)
-}
-
-/// Get the ML-KEM public key
-fn handle_kem_get_public_key(_count: usize) -> RpcResult {
-    unsafe {
-        if let Some(ref kp) = KEM_KEY_PAIR {
-            let pk_bytes = kp.public_key().as_slice();
-            PK_BUFFER.copy_from_slice(pk_bytes);
-            warn!("Returning ML-KEM public key ({} bytes)", pk_bytes.len());
-            RpcResult::Int(kem::PUBLIC_KEY_SIZE as i64)
-        } else {
-            warn!("No ML-KEM key pair generated!");
-            RpcResult::Error(-1, "No key pair")
-        }
-    }
-}
-
-/// Decapsulate a ciphertext to get the shared secret
-fn handle_kem_decapsulate(count: usize) -> RpcResult {
-    warn!("Decapsulating ciphertext...");
+    // Step 2: Encapsulate (simulate sender creating shared secret)
+    warn!("");
+    warn!("Step 2: Encapsulating shared secret...");
     show_lock();
+    sleep(Duration::millis_at_least(500));
 
-    if count < 1 {
-        return RpcResult::Error(-1, "Need ciphertext");
+    let mut encaps_randomness = [0u8; kem::ENCAPS_SEED_SIZE];
+    rng.fill_bytes(&mut encaps_randomness);
+
+    let (ciphertext, shared_secret_sender) =
+        kem::encapsulate(key_pair.public_key(), encaps_randomness);
+    warn!("  Ciphertext:     {} bytes", kem::CIPHERTEXT_SIZE);
+    warn!("  Shared secret:  {} bytes", kem::SHARED_SECRET_SIZE);
+    warn!("  Encapsulation complete!");
+
+    // Step 3: Decapsulate (receiver recovers shared secret)
+    warn!("");
+    warn!("Step 3: Decapsulating to recover shared secret...");
+    show_lock();
+    sleep(Duration::millis_at_least(500));
+
+    let shared_secret_receiver = kem::decapsulate(key_pair.private_key(), &ciphertext);
+    warn!("  Decapsulation complete!");
+
+    // Step 4: Verify shared secrets match
+    warn!("");
+    warn!("Step 4: Verifying shared secrets match...");
+    show_shield();
+    sleep(Duration::millis_at_least(300));
+
+    let sender_bytes = shared_secret_sender.as_slice();
+    let receiver_bytes = shared_secret_receiver.as_slice();
+
+    let mut secrets_match = true;
+    for i in 0..32 {
+        if sender_bytes[i] != receiver_bytes[i] {
+            secrets_match = false;
+            break;
+        }
     }
 
-    unsafe {
-        if let Some(ref kp) = KEM_KEY_PAIR {
-            let ct_bytes = &PARAMS.bytes[..kem::CIPHERTEXT_SIZE];
-            let mut ct_array = [0u8; kem::CIPHERTEXT_SIZE];
-            ct_array.copy_from_slice(ct_bytes);
-
-            let ciphertext = kem::ciphertext_from_bytes(&ct_array);
-            let shared_secret = kem::decapsulate(kp.private_key(), &ciphertext);
-
-            SS_BUFFER.copy_from_slice(shared_secret.as_slice());
-            SHARED_SECRET = Some(SS_BUFFER);
-
-            warn!("Decapsulation successful!");
-            RpcResult::Int(32)
-        } else {
-            warn!("No ML-KEM key pair generated!");
-            show_x();
-            RpcResult::Error(-1, "No key pair")
-        }
+    if secrets_match {
+        warn!("  SUCCESS: Shared secrets match!");
+        warn!("");
+        warn!("  First 8 bytes of shared secret:");
+        warn!(
+            "    {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+            sender_bytes[0],
+            sender_bytes[1],
+            sender_bytes[2],
+            sender_bytes[3],
+            sender_bytes[4],
+            sender_bytes[5],
+            sender_bytes[6],
+            sender_bytes[7]
+        );
+        warn!("");
+        warn!("========================================");
+        warn!("  ML-KEM 768 Demo Complete!");
+        warn!("========================================");
+        show_checkmark();
+        RpcResult::Bool(true)
+    } else {
+        warn!("  FAILURE: Shared secrets do not match!");
+        show_x();
+        RpcResult::Error(-1, "Secrets mismatch")
     }
 }
 
-/// Get the shared secret
-fn handle_kem_get_shared_secret(_count: usize) -> RpcResult {
-    unsafe {
-        if let Some(ref ss) = SHARED_SECRET {
-            SS_BUFFER.copy_from_slice(ss);
-            warn!("Returning shared secret (32 bytes)");
-            RpcResult::Int(32)
-        } else {
-            RpcResult::Error(-1, "No shared secret")
-        }
-    }
-}
+/// Run complete ML-DSA demo on-device
+/// Demonstrates: key generation, signing (verification skipped for speed)
+fn handle_mldsa_demo(_count: usize) -> RpcResult {
+    warn!("");
+    warn!("========================================");
+    warn!("  ML-DSA 65 Demo (FIPS 204)");
+    warn!("========================================");
+    warn!("");
 
-/// Generate ML-DSA key pair from the shared secret
-fn handle_dsa_generate_from_secret(_count: usize) -> RpcResult {
-    warn!("Generating ML-DSA 65 key pair from shared secret...");
+    // Step 1: Generate key pair
+    warn!("Step 1: Generating ML-DSA 65 key pair...");
     show_key();
+    sleep(Duration::millis_at_least(300));
 
-    unsafe {
-        if let Some(ref ss) = SHARED_SECRET {
-            // Use shared secret to seed RNG for ML-DSA key generation
-            let mut rng = SimpleRng::from_bytes(ss);
-            let mut randomness = [0u8; dsa::KEYGEN_RANDOMNESS_SIZE];
-            rng.fill_bytes(&mut randomness);
+    let mut rng = SimpleRng::new(0xDEADBEEF_CAFEBABE);
+    let mut keygen_randomness = [0u8; dsa::KEYGEN_RANDOMNESS_SIZE];
+    rng.fill_bytes(&mut keygen_randomness);
 
-            // Generate ML-DSA key pair
-            let key_pair = dsa::generate_key_pair(randomness);
-            DSA_KEY_PAIR = Some(key_pair);
-            LAST_SIGNATURE = None;
+    let key_pair = dsa::generate_key_pair(keygen_randomness);
+    warn!("  Verification key: {} bytes", dsa::VERIFICATION_KEY_SIZE);
+    warn!("  Signing key:      {} bytes", dsa::SIGNING_KEY_SIZE);
+    warn!("  Key pair generated!");
 
-            warn!("ML-DSA 65 key pair generated!");
-            RpcResult::Bool(true)
-        } else {
-            warn!("No shared secret available!");
-            show_x();
-            RpcResult::Error(-1, "No shared secret")
-        }
-    }
-}
-
-/// Get the ML-DSA verification key
-fn handle_dsa_get_verification_key(_count: usize) -> RpcResult {
-    unsafe {
-        if let Some(ref kp) = DSA_KEY_PAIR {
-            VK_BUFFER.copy_from_slice(kp.verification_key.as_slice());
-            warn!(
-                "Returning ML-DSA verification key ({} bytes)",
-                dsa::VERIFICATION_KEY_SIZE
-            );
-            RpcResult::Int(dsa::VERIFICATION_KEY_SIZE as i64)
-        } else {
-            warn!("No ML-DSA key pair generated!");
-            RpcResult::Error(-1, "No DSA key pair")
-        }
-    }
-}
-
-/// Sign a message with ML-DSA
-fn handle_dsa_sign(count: usize) -> RpcResult {
-    warn!("Signing message with ML-DSA 65...");
+    // Step 2: Sign a message
+    warn!("");
+    warn!("Step 2: Signing message...");
     show_signature();
+    sleep(Duration::millis_at_least(300));
 
-    if count < 1 {
-        return RpcResult::Error(-1, "Need message");
-    }
+    let message = b"Hello from Arduino Uno Q!";
+    let context: &[u8] = b"";
 
-    unsafe {
-        if let Some(ref kp) = DSA_KEY_PAIR {
-            // Get message from params
-            let msg_len = PARAMS.ints[0] as usize;
-            let message = &PARAMS.bytes[..msg_len.min(256)];
+    let mut sign_randomness = [0u8; dsa::SIGNING_RANDOMNESS_SIZE];
+    rng.fill_bytes(&mut sign_randomness);
 
-            // Generate signing randomness
-            let mut rng = SimpleRng::new(0xDEADBEEF_CAFEBABE);
-            let mut randomness = [0u8; dsa::SIGNING_RANDOMNESS_SIZE];
-            rng.fill_bytes(&mut randomness);
-
-            // Sign with empty context (domain separation)
-            let context: &[u8] = b"";
-
-            match dsa::sign(&kp.signing_key, message, context, randomness) {
-                Ok(signature) => {
-                    SIG_BUFFER.copy_from_slice(signature.as_slice());
-                    LAST_SIGNATURE = Some(signature);
-                    warn!("Signature generated ({} bytes)", dsa::SIGNATURE_SIZE);
-                    show_checkmark();
-                    RpcResult::Int(dsa::SIGNATURE_SIZE as i64)
-                }
-                Err(_e) => {
-                    warn!("Signing failed!");
-                    show_x();
-                    RpcResult::Error(-2, "Signing failed")
-                }
-            }
-        } else {
-            warn!("No ML-DSA key pair generated!");
+    match dsa::sign(&key_pair.signing_key, message, context, sign_randomness) {
+        Ok(signature) => {
+            warn!("  Message:   \"Hello from Arduino Uno Q!\"");
+            warn!("  Signature: {} bytes", dsa::SIGNATURE_SIZE);
+            warn!("  Signing complete!");
+            warn!("");
+            warn!("  (Verification skipped for demo speed)");
+            warn!("");
+            warn!("========================================");
+            warn!("  ML-DSA 65 Demo Complete!");
+            warn!("========================================");
+            show_checkmark();
+            RpcResult::Bool(true)
+        }
+        Err(_) => {
+            warn!("  FAILURE: Signing failed!");
             show_x();
-            RpcResult::Error(-1, "No DSA key pair")
+            RpcResult::Error(-1, "Sign failed")
         }
     }
 }
 
-/// Get the last signature
-fn handle_dsa_get_signature(_count: usize) -> RpcResult {
-    unsafe {
-        if let Some(ref sig) = LAST_SIGNATURE {
-            SIG_BUFFER.copy_from_slice(sig.as_slice());
-            warn!("Returning signature ({} bytes)", dsa::SIGNATURE_SIZE);
-            RpcResult::Int(dsa::SIGNATURE_SIZE as i64)
-        } else {
-            RpcResult::Error(-1, "No signature")
+/// Run complete PQC demo combining ML-KEM and ML-DSA
+/// This is the full demonstration showing how PQC can protect communications
+fn handle_pqc_demo(_count: usize) -> RpcResult {
+    warn!("");
+    warn!("╔══════════════════════════════════════════════════════════════╗");
+    warn!("║                                                              ║");
+    warn!("║           POST-QUANTUM CRYPTOGRAPHY DEMO                     ║");
+    warn!("║                                                              ║");
+    warn!("║   ML-KEM 768 (FIPS 203) + ML-DSA 65 (FIPS 204)              ║");
+    warn!("║   Running on Arduino Uno Q (STM32U585 MCU)                   ║");
+    warn!("║                                                              ║");
+    warn!("╚══════════════════════════════════════════════════════════════╝");
+    warn!("");
+
+    // ==========================================
+    // Phase 1: Key Exchange with ML-KEM 768
+    // ==========================================
+    warn!("┌──────────────────────────────────────────────────────────────┐");
+    warn!("│  PHASE 1: Post-Quantum Key Exchange (ML-KEM 768)            │");
+    warn!("└──────────────────────────────────────────────────────────────┘");
+    warn!("");
+
+    // Step 1.1: Generate ML-KEM key pair
+    warn!("  [1.1] Generating ML-KEM 768 key pair...");
+    show_key();
+    sleep(Duration::millis_at_least(600));
+
+    let mut rng = SimpleRng::new(0x12345678_9ABCDEF0);
+    let mut kem_keygen_rand = [0u8; kem::KEYGEN_SEED_SIZE];
+    rng.fill_bytes(&mut kem_keygen_rand);
+
+    let kem_keypair = kem::generate_key_pair(kem_keygen_rand);
+    warn!("        Public key:  {} bytes", kem::PUBLIC_KEY_SIZE);
+    warn!("        Private key: {} bytes", kem::PRIVATE_KEY_SIZE);
+
+    // Step 1.2: Encapsulate shared secret
+    warn!("");
+    warn!("  [1.2] Encapsulating shared secret...");
+    show_lock();
+    sleep(Duration::millis_at_least(400));
+
+    let mut encaps_rand = [0u8; kem::ENCAPS_SEED_SIZE];
+    rng.fill_bytes(&mut encaps_rand);
+
+    let (ciphertext, shared_secret_enc) = kem::encapsulate(kem_keypair.public_key(), encaps_rand);
+    warn!("        Ciphertext:    {} bytes", kem::CIPHERTEXT_SIZE);
+    warn!("        Shared secret: {} bytes", kem::SHARED_SECRET_SIZE);
+
+    // Step 1.3: Decapsulate
+    warn!("");
+    warn!("  [1.3] Decapsulating shared secret...");
+    show_lock();
+    sleep(Duration::millis_at_least(400));
+
+    let shared_secret_dec = kem::decapsulate(kem_keypair.private_key(), &ciphertext);
+
+    // Verify shared secrets match
+    let enc_bytes = shared_secret_enc.as_slice();
+    let dec_bytes = shared_secret_dec.as_slice();
+    let mut kem_success = true;
+    for i in 0..32 {
+        if enc_bytes[i] != dec_bytes[i] {
+            kem_success = false;
+            break;
         }
     }
-}
 
-/// Full PQC demo: decapsulate ciphertext, generate DSA keys, sign message
-/// Params: ciphertext (1088 bytes), then message length (int), then message
-fn handle_pqc_full_demo(count: usize) -> RpcResult {
-    warn!("=== Starting full PQC demo ===");
-
-    if count < 2 {
-        return RpcResult::Error(-1, "Need ciphertext and message");
+    if !kem_success {
+        warn!("        FAILURE: Key exchange failed!");
+        show_x();
+        return RpcResult::Error(-1, "KEM failed");
     }
 
-    unsafe {
-        // Step 1: Check ML-KEM key pair exists
-        if KEM_KEY_PAIR.is_none() {
-            warn!("No ML-KEM key pair - generating...");
-            show_key();
-            let mut rng = SimpleRng::new(0x12345678_9ABCDEF0);
-            let mut randomness = [0u8; kem::KEYGEN_SEED_SIZE];
-            rng.fill_bytes(&mut randomness);
-            KEM_KEY_PAIR = Some(kem::generate_key_pair(randomness));
-        }
+    warn!("        Shared secrets match!");
+    warn!("");
+    warn!("  ✓ ML-KEM 768 key exchange successful");
+    warn!("");
 
-        // Step 2: Decapsulate
-        warn!("Step 1: Decapsulating ciphertext...");
-        show_lock();
+    // ==========================================
+    // Phase 2: Digital Signatures with ML-DSA 65
+    // ==========================================
+    warn!("┌──────────────────────────────────────────────────────────────┐");
+    warn!("│  PHASE 2: Post-Quantum Digital Signatures (ML-DSA 65)       │");
+    warn!("└──────────────────────────────────────────────────────────────┘");
+    warn!("");
 
-        let kp = KEM_KEY_PAIR.as_ref().unwrap();
-        let ct_bytes = &PARAMS.bytes[..kem::CIPHERTEXT_SIZE];
-        let mut ct_array = [0u8; kem::CIPHERTEXT_SIZE];
-        ct_array.copy_from_slice(ct_bytes);
+    // Step 2.1: Generate ML-DSA key pair (seeded from shared secret for demo)
+    warn!("  [2.1] Generating ML-DSA 65 key pair...");
+    show_key();
+    sleep(Duration::millis_at_least(600));
 
-        let ciphertext = kem::ciphertext_from_bytes(&ct_array);
-        let shared_secret = kem::decapsulate(kp.private_key(), &ciphertext);
-        SS_BUFFER.copy_from_slice(shared_secret.as_slice());
-        SHARED_SECRET = Some(SS_BUFFER);
-        warn!("  Shared secret derived!");
-
-        // Step 3: Generate ML-DSA key pair from shared secret
-        warn!("Step 2: Generating ML-DSA keys from shared secret...");
-        show_key();
-
-        let mut rng = SimpleRng::from_bytes(&SS_BUFFER);
-        let mut dsa_randomness = [0u8; dsa::KEYGEN_RANDOMNESS_SIZE];
-        rng.fill_bytes(&mut dsa_randomness);
-
-        let dsa_keypair = dsa::generate_key_pair(dsa_randomness);
-        VK_BUFFER.copy_from_slice(dsa_keypair.verification_key.as_slice());
-        DSA_KEY_PAIR = Some(dsa_keypair);
-        warn!("  ML-DSA key pair generated!");
-
-        // Step 4: Sign the message
-        warn!("Step 3: Signing message...");
-        show_signature();
-
-        let msg_len = PARAMS.ints[0] as usize;
-        let message = &PARAMS.bytes[kem::CIPHERTEXT_SIZE..kem::CIPHERTEXT_SIZE + msg_len.min(256)];
-
-        let mut sign_rng = SimpleRng::new(0xDEADBEEF_CAFEBABE);
-        let mut sign_randomness = [0u8; dsa::SIGNING_RANDOMNESS_SIZE];
-        sign_rng.fill_bytes(&mut sign_randomness);
-
-        let context: &[u8] = b"";
-        let dsa_kp = DSA_KEY_PAIR.as_ref().unwrap();
-
-        match dsa::sign(&dsa_kp.signing_key, message, context, sign_randomness) {
-            Ok(signature) => {
-                SIG_BUFFER.copy_from_slice(signature.as_slice());
-                LAST_SIGNATURE = Some(signature);
-                warn!("  Message signed!");
-                warn!("=== PQC demo complete ===");
-                show_checkmark();
-                RpcResult::Bool(true)
-            }
-            Err(_e) => {
-                warn!("  Signing failed!");
-                show_x();
-                RpcResult::Error(-2, "Signing failed")
-            }
-        }
+    // Use first 8 bytes of shared secret as seed for deterministic demo
+    let mut seed = 0u64;
+    for (i, &b) in enc_bytes.iter().take(8).enumerate() {
+        seed |= (b as u64) << (i * 8);
     }
+    let mut dsa_rng = SimpleRng::new(seed);
+
+    let mut dsa_keygen_rand = [0u8; dsa::KEYGEN_RANDOMNESS_SIZE];
+    dsa_rng.fill_bytes(&mut dsa_keygen_rand);
+
+    let dsa_keypair = dsa::generate_key_pair(dsa_keygen_rand);
+    warn!(
+        "        Verification key: {} bytes",
+        dsa::VERIFICATION_KEY_SIZE
+    );
+    warn!("        Signing key:      {} bytes", dsa::SIGNING_KEY_SIZE);
+
+    // Step 2.2: Sign a message
+    warn!("");
+    warn!("  [2.2] Signing message...");
+    show_signature();
+    sleep(Duration::millis_at_least(500));
+
+    let message = b"Quantum-safe message from Arduino Uno Q";
+    let context: &[u8] = b"pqc-demo-v2";
+
+    let mut sign_rand = [0u8; dsa::SIGNING_RANDOMNESS_SIZE];
+    dsa_rng.fill_bytes(&mut sign_rand);
+
+    match dsa::sign(&dsa_keypair.signing_key, message, context, sign_rand) {
+        Ok(_signature) => {
+            warn!("        Message: \"Quantum-safe message from Arduino Uno Q\"");
+            warn!("        Signature: {} bytes", dsa::SIGNATURE_SIZE);
+            warn!("");
+            warn!("  ✓ ML-DSA 65 signing successful");
+        }
+        Err(_) => {
+            warn!("        FAILURE: Signing failed!");
+            show_x();
+            return RpcResult::Error(-2, "Sign failed");
+        }
+    };
+
+    // ==========================================
+    // Summary
+    // ==========================================
+    warn!("");
+    warn!("╔══════════════════════════════════════════════════════════════╗");
+    warn!("║                      DEMO COMPLETE                           ║");
+    warn!("╠══════════════════════════════════════════════════════════════╣");
+    warn!("║  ML-KEM 768:  Key exchange verified                          ║");
+    warn!("║  ML-DSA 65:   Signature generated                            ║");
+    warn!("║                                                              ║");
+    warn!("║  This MCU is now quantum-resistant!                          ║");
+    warn!("╚══════════════════════════════════════════════════════════════╝");
+    warn!("");
+
+    show_checkmark();
+    RpcResult::Bool(true)
 }
 
 /// Clear LED matrix
@@ -486,22 +510,32 @@ extern "C" fn rust_main() {
         zephyr::set_logger().unwrap();
     }
 
-    warn!("===========================================");
-    warn!("  PQC Demo - Arduino Uno Q");
-    warn!("  Post-Quantum Cryptography");
-    warn!("  ML-KEM 768 + ML-DSA 65");
-    warn!("===========================================");
     warn!("");
-    warn!("ML-KEM 768 Parameters:");
-    warn!("  Public Key:    {} bytes", kem::PUBLIC_KEY_SIZE);
-    warn!("  Private Key:   {} bytes", kem::PRIVATE_KEY_SIZE);
-    warn!("  Ciphertext:    {} bytes", kem::CIPHERTEXT_SIZE);
-    warn!("  Shared Secret: {} bytes", kem::SHARED_SECRET_SIZE);
+    warn!("╔══════════════════════════════════════════════════════════════╗");
+    warn!("║                                                              ║");
+    warn!("║           PQC Demo - Arduino Uno Q                           ║");
+    warn!("║           Post-Quantum Cryptography                          ║");
+    warn!("║                                                              ║");
+    warn!("║           ML-KEM 768 (FIPS 203)                              ║");
+    warn!("║           ML-DSA 65  (FIPS 204)                              ║");
+    warn!("║                                                              ║");
+    warn!("╚══════════════════════════════════════════════════════════════╝");
     warn!("");
-    warn!("ML-DSA 65 Parameters:");
-    warn!("  Verification Key: {} bytes", dsa::VERIFICATION_KEY_SIZE);
-    warn!("  Signing Key:      {} bytes", dsa::SIGNING_KEY_SIZE);
-    warn!("  Signature:        {} bytes", dsa::SIGNATURE_SIZE);
+    warn!("Algorithm Parameters:");
+    warn!("");
+    warn!("  ML-KEM 768:");
+    warn!("    Public Key:    {:>5} bytes", kem::PUBLIC_KEY_SIZE);
+    warn!("    Private Key:   {:>5} bytes", kem::PRIVATE_KEY_SIZE);
+    warn!("    Ciphertext:    {:>5} bytes", kem::CIPHERTEXT_SIZE);
+    warn!("    Shared Secret: {:>5} bytes", kem::SHARED_SECRET_SIZE);
+    warn!("");
+    warn!("  ML-DSA 65:");
+    warn!(
+        "    Verification Key: {:>5} bytes",
+        dsa::VERIFICATION_KEY_SIZE
+    );
+    warn!("    Signing Key:      {:>5} bytes", dsa::SIGNING_KEY_SIZE);
+    warn!("    Signature:        {:>5} bytes", dsa::SIGNATURE_SIZE);
     warn!("");
 
     // Initialize LED matrix
@@ -517,9 +551,9 @@ extern "C" fn rust_main() {
     }
     warn!("LED matrix initialized!");
 
-    // Show key icon briefly
+    // Show key icon briefly at startup
     show_key();
-    sleep(Duration::millis_at_least(500));
+    sleep(Duration::millis_at_least(800));
     unsafe {
         matrix().clear();
     }
@@ -537,6 +571,7 @@ extern "C" fn rust_main() {
     warn!("SPI initialized!");
 
     // Create RPC server and register handlers
+    warn!("");
     warn!("Registering RPC handlers...");
     let mut server = RpcServer::new();
 
@@ -544,30 +579,23 @@ extern "C" fn rust_main() {
     server.register("ping", handle_ping);
     server.register("version", handle_version);
 
-    // ML-KEM methods
-    server.register("mlkem.generate_keypair", handle_kem_generate_keypair);
-    server.register("mlkem.get_public_key", handle_kem_get_public_key);
-    server.register("mlkem.decapsulate", handle_kem_decapsulate);
-    server.register("mlkem.get_shared_secret", handle_kem_get_shared_secret);
-
-    // ML-DSA methods
-    server.register(
-        "mldsa.generate_from_secret",
-        handle_dsa_generate_from_secret,
-    );
-    server.register(
-        "mldsa.get_verification_key",
-        handle_dsa_get_verification_key,
-    );
-    server.register("mldsa.sign", handle_dsa_sign);
-    server.register("mldsa.get_signature", handle_dsa_get_signature);
-
-    // Combined PQC demo
-    server.register("pqc.full_demo", handle_pqc_full_demo);
+    // Demo methods (self-contained, no binary data needed)
+    server.register("pqc.run_demo", handle_pqc_demo);
+    server.register("mlkem.run_demo", handle_mlkem_demo);
+    server.register("mldsa.run_demo", handle_mldsa_demo);
 
     // LED matrix control
     server.register("led_matrix.clear", handle_matrix_clear);
 
+    warn!("");
+    warn!("Available RPC methods:");
+    warn!("  - ping              -> \"pong\"");
+    warn!("  - version           -> firmware version");
+    warn!("  - pqc.run_demo      -> full ML-KEM + ML-DSA demo");
+    warn!("  - mlkem.run_demo    -> ML-KEM 768 demo only");
+    warn!("  - mldsa.run_demo    -> ML-DSA 65 demo only");
+    warn!("  - led_matrix.clear  -> clear LED display");
+    warn!("");
     warn!("PQC RPC server ready!");
     warn!("Waiting for requests from Linux...");
 

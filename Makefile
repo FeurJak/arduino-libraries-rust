@@ -405,3 +405,29 @@ setup-spi-router: check-zigbuild check-ssh
 ssh-board: check-ssh
 	@echo "$(CYAN)SSH to Arduino Uno Q...$(NC)"
 	sshpass -p '$(BOARD_PASS)' ssh $(BOARD_USER)@$(BOARD_IP)
+
+# =============================================================================
+# Quick Demo Targets (via ADB - no password needed)
+# =============================================================================
+
+# Run PQC ML-KEM demo on MCU
+pqc-demo: check-adb
+	@echo "$(CYAN)Running ML-KEM 768 demo on MCU...$(NC)"
+	@echo "Watch the LED matrix for status indicators!"
+	@echo ""
+	adb shell "/home/arduino/pqc-client --mlkem-demo"
+
+# Run PQC ML-DSA demo on MCU (slow - may take >60s)
+pqc-demo-dsa: check-adb
+	@echo "$(CYAN)Running ML-DSA 65 demo on MCU (this is slow)...$(NC)"
+	@echo "Watch the LED matrix for status indicators!"
+	@echo ""
+	adb shell "/home/arduino/pqc-client --mldsa-demo"
+
+# Ping the MCU
+pqc-ping: check-adb
+	adb shell "/home/arduino/pqc-client --ping"
+
+# Run any pqc-client command: make pqc CMD='--help'
+pqc: check-adb
+	adb shell "/home/arduino/pqc-client $(CMD)"

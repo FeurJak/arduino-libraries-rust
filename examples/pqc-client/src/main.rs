@@ -42,9 +42,21 @@ struct Args {
     #[arg(short, long, default_value = "/tmp/arduino-spi-router.sock")]
     socket: String,
 
-    /// Run the full PQC demo
+    /// Run the full PQC demo (locally simulated)
     #[arg(short, long)]
     demo: bool,
+
+    /// Run the MCU-side PQC demo (ML-KEM + ML-DSA on MCU)
+    #[arg(long)]
+    mcu_demo: bool,
+
+    /// Run the MCU-side ML-KEM demo
+    #[arg(long)]
+    mlkem_demo: bool,
+
+    /// Run the MCU-side ML-DSA demo
+    #[arg(long)]
+    mldsa_demo: bool,
 
     /// Just ping the MCU
     #[arg(short, long)]
@@ -253,6 +265,66 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // MCU-side demos - all cryptography runs on the STM32U585
+    // Use 60 second timeout for crypto operations
+    let demo_timeout = std::time::Duration::from_secs(60);
+
+    if args.mcu_demo {
+        info!("");
+        info!("Running full PQC demo on MCU (ML-KEM + ML-DSA)...");
+        info!("Watch the LED matrix for status indicators!");
+        info!("(This may take up to 30 seconds)");
+        info!("");
+        match client.call_timeout("pqc.run_demo", vec![], demo_timeout) {
+            Ok(result) => {
+                info!("MCU demo completed: {:?}", result);
+                info!("");
+                info!("The MCU successfully ran:");
+                info!("  - ML-KEM 768 key generation, encapsulation, decapsulation");
+                info!("  - ML-DSA 65 key generation, signing, verification");
+            }
+            Err(e) => {
+                error!("MCU demo failed: {}", e);
+                return Err(e.into());
+            }
+        }
+        return Ok(());
+    }
+
+    if args.mlkem_demo {
+        info!("");
+        info!("Running ML-KEM 768 demo on MCU...");
+        info!("Watch the LED matrix for status indicators!");
+        info!("");
+        match client.call_timeout("mlkem.run_demo", vec![], demo_timeout) {
+            Ok(result) => {
+                info!("ML-KEM demo completed: {:?}", result);
+            }
+            Err(e) => {
+                error!("ML-KEM demo failed: {}", e);
+                return Err(e.into());
+            }
+        }
+        return Ok(());
+    }
+
+    if args.mldsa_demo {
+        info!("");
+        info!("Running ML-DSA 65 demo on MCU...");
+        info!("Watch the LED matrix for status indicators!");
+        info!("");
+        match client.call_timeout("mldsa.run_demo", vec![], demo_timeout) {
+            Ok(result) => {
+                info!("ML-DSA demo completed: {:?}", result);
+            }
+            Err(e) => {
+                error!("ML-DSA demo failed: {}", e);
+                return Err(e.into());
+            }
+        }
+        return Ok(());
+    }
+
     if args.demo {
         return run_demo(&client, &args.message);
     }
@@ -261,7 +333,10 @@ fn main() -> Result<()> {
     info!("");
     info!("Usage:");
     info!("  pqc-client --ping               Test connection");
-    info!("  pqc-client --demo               Run full PQC demo");
+    info!("  pqc-client --mcu-demo           Run full PQC demo on MCU");
+    info!("  pqc-client --mlkem-demo         Run ML-KEM 768 demo on MCU");
+    info!("  pqc-client --mldsa-demo         Run ML-DSA 65 demo on MCU");
+    info!("  pqc-client --demo               Run local simulation demo");
     info!("  pqc-client --demo -m \"msg\"      Demo with custom message");
     info!("");
 

@@ -228,6 +228,11 @@ impl RpcClientSync {
         self.runtime.block_on(self.client.call(method, params))
     }
 
+    /// Call an RPC method with custom timeout (blocking)
+    pub fn call_timeout(&self, method: &str, params: Vec<rmpv::Value>, timeout: Duration) -> RpcResult<rmpv::Value> {
+        self.runtime.block_on(self.client.call_timeout(method, params, timeout))
+    }
+
     /// Send a notification (blocking)
     pub fn notify(&self, method: &str, params: Vec<rmpv::Value>) -> RpcResult<()> {
         self.runtime.block_on(self.client.notify(method, params))

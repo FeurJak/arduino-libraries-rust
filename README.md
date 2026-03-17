@@ -87,13 +87,14 @@ Linux-side RPC client library for calling MCU methods.
 
 ### arduino-cryptography (MCU)
 
-Post-quantum cryptography library for the MCU, providing ML-KEM (FIPS 203) key encapsulation.
+Post-quantum cryptography library for the MCU, providing ML-KEM (FIPS 203) key encapsulation and ML-DSA (FIPS 204) digital signatures.
 
 **Features:**
 
-- ML-KEM 768 (NIST Level 3 security)
+- ML-KEM 768 (NIST Level 3 security) - Key encapsulation
+- ML-DSA 65 (NIST Level 3 security) - Digital signatures
 - Formally verified implementation via [libcrux-iot](https://github.com/cryspen/libcrux-iot)
-- Quantum-resistant key exchange
+- Quantum-resistant cryptography
 - no_std compatible
 
 ## Examples
@@ -117,6 +118,10 @@ Complete application that fetches weather data from Open-Meteo API and displays 
 ### mlkem-demo (MCU) + mlkem-client (Linux)
 
 Post-quantum key exchange demonstration using ML-KEM 768 between MCU and Linux.
+
+### pqc-demo (MCU) + pqc-client (Linux)
+
+Complete post-quantum cryptography demonstration combining ML-KEM 768 (key encapsulation) and ML-DSA 65 (digital signatures). Runs entirely on the MCU with LED matrix visual feedback.
 
 ## Requirements
 
@@ -184,6 +189,47 @@ make run-linux APP=weather-display ARGS='--interval 300'
 --demo            Demo mode (cycle through patterns)
 ```
 
+### Running the PQC Demo
+
+The PQC demo demonstrates post-quantum cryptography (ML-KEM 768) running entirely on the MCU with LED matrix visual feedback.
+
+**Prerequisites:**
+
+1. Flash the `pqc-demo` firmware to the MCU
+2. Deploy the `pqc-client` to the Linux side
+3. Ensure `arduino-spi-router` is running on Linux
+
+**Step-by-step:**
+
+```bash
+# 1. Build and flash the PQC demo firmware to MCU
+make build APP=pqc-demo
+make flash APP=pqc-demo
+
+# 2. Build and deploy the pqc-client Linux app
+make build-linux APP=pqc-client
+make deploy-linux APP=pqc-client
+
+# 3. Run the ML-KEM demo (recommended - fast, ~2 seconds)
+make pqc-demo
+
+# Or ping the MCU
+make pqc-ping
+
+# Or run with custom arguments
+make pqc CMD='--mlkem-demo'
+make pqc CMD='--mldsa-demo'   # Note: ML-DSA is slow (>60s)
+```
+
+**LED Matrix Indicators:**
+
+| Pattern | Meaning |
+|---------|---------|
+| Key | Generating keys |
+| Lock | Encrypting/decrypting |
+| Checkmark | Success |
+| X | Failure |
+
 ### Running Linux Services
 
 ```bash
@@ -218,7 +264,7 @@ client.call("led_matrix.set_pixel", vec![
 arduino-libraries-rust/
 ├── arduino-led-matrix/          # MCU: LED Matrix library
 ├── arduino-rpc-bridge/          # MCU: RPC library (no_std)
-├── arduino-cryptography/        # MCU: Post-quantum crypto (ML-KEM)
+├── arduino-cryptography/        # MCU: Post-quantum crypto (ML-KEM + ML-DSA)
 ├── arduino-spi-router/          # Linux: SPI router daemon
 ├── arduino-rpc-client/          # Linux: RPC client library
 ├── examples/
@@ -226,8 +272,10 @@ arduino-libraries-rust/
 │   ├── spi-test/                # MCU: SPI communication test
 │   ├── rpc-server/              # MCU: RPC server example
 │   ├── mlkem-demo/              # MCU: ML-KEM crypto demo
+│   ├── pqc-demo/                # MCU: Full PQC demo (ML-KEM + ML-DSA)
 │   ├── weather-display/         # Linux: Weather on LED matrix
-│   └── mlkem-client/            # Linux: ML-KEM client
+│   ├── mlkem-client/            # Linux: ML-KEM client
+│   └── pqc-client/              # Linux: PQC demo client
 ├── docker/
 │   └── Dockerfile               # Build environment
 ├── Makefile
