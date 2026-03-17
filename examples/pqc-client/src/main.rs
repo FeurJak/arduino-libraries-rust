@@ -62,6 +62,10 @@ struct Args {
     #[arg(long)]
     cose_demo: bool,
 
+    /// Run the MCU-side Ed25519 demo (fast, non-PQC baseline)
+    #[arg(long)]
+    ed25519_demo: bool,
+
     /// Just ping the MCU
     #[arg(short, long)]
     ping: bool,
@@ -355,6 +359,28 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if args.ed25519_demo {
+        info!("");
+        info!("Running Ed25519 demo on MCU...");
+        info!("Watch the LED matrix for status indicators!");
+        info!("");
+        match client.call_timeout("ed25519.run_demo", vec![], demo_timeout) {
+            Ok(result) => {
+                info!("Ed25519 demo completed: {:?}", result);
+                info!("");
+                info!("The MCU successfully:");
+                info!("  - Generated Ed25519 key pair");
+                info!("  - Signed a test message");
+                info!("  - Verified the signature");
+            }
+            Err(e) => {
+                error!("Ed25519 demo failed: {}", e);
+                return Err(e.into());
+            }
+        }
+        return Ok(());
+    }
+
     if args.demo {
         return run_demo(&client, &args.message);
     }
@@ -365,7 +391,8 @@ fn main() -> Result<()> {
     info!("  pqc-client --ping               Test connection");
     info!("  pqc-client --mcu-demo           Run full PQC demo on MCU");
     info!("  pqc-client --mlkem-demo         Run ML-KEM 768 demo on MCU");
-    info!("  pqc-client --mldsa-demo         Run ML-DSA 65 demo on MCU");
+    info!("  pqc-client --mldsa-demo         Run ML-DSA 65 demo on MCU (slow!)");
+    info!("  pqc-client --ed25519-demo       Run Ed25519 demo on MCU (fast!)");
     info!("  pqc-client --cose-demo          Run COSE_Sign1 demo on MCU");
     info!("  pqc-client --demo               Run local simulation demo");
     info!("  pqc-client --demo -m \"msg\"      Demo with custom message");

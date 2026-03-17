@@ -40,3 +40,6 @@ mlkem1024 = ["libcrux-iot-ml-kem/mlkem1024"]
 mldsa44 = ["libcrux-iot-ml-dsa/mldsa44"]
 mldsa65 = ["libcrux-iot-ml-dsa/mldsa65"]
 mldsa87 = ["libcrux-iot-ml-dsa/mldsa87"]
+
+# Classical cryptography (via mbedTLS PSA Crypto)
+ed25519 = []

@@ -15,5 +15,9 @@ target_sources(app PRIVATE src/c/matrix.c)
 # This file is provided by arduino-cryptography library
 target_sources(app PRIVATE arduino-cryptography/c/hwrng.c)
 
+# Add Ed25519 implementation (classical cryptography)
+# This file is provided by arduino-cryptography library
+target_sources(app PRIVATE arduino-cryptography/c/ed25519.c)
+
 # Build the Rust application
 rust_cargo_application()

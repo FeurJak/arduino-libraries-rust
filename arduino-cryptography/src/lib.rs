@@ -2,12 +2,20 @@
 //
 // Arduino Cryptography Library
 //
-// Provides post-quantum cryptographic primitives for the Arduino Uno Q:
+// Provides cryptographic primitives for the Arduino Uno Q:
+//
+// Post-Quantum Cryptography (via libcrux-iot):
 // - ML-KEM (FIPS 203) for key encapsulation
 // - ML-DSA (FIPS 204) for digital signatures
+//
+// Classical Cryptography (via mbedTLS PSA Crypto):
+// - Ed25519 (RFC 8032) for digital signatures
+//
+// Common:
 // - Hardware RNG integration via Zephyr's entropy API
 //
-// This library wraps libcrux-iot for embedded use on the STM32U585 MCU.
+// This library provides a unified interface for cryptographic operations
+// on the STM32U585 MCU.
 
 #![no_std]
 
@@ -19,6 +27,13 @@ pub use libcrux_secrets;
 /// Provides cryptographically secure randomness from the STM32U585's TRNG.
 /// See the module documentation for setup requirements.
 pub mod rng;
+
+/// Ed25519 digital signatures (RFC 8032) using PSA Crypto API.
+///
+/// Requires mbedTLS with PSA Crypto and Ed25519 support enabled in Zephyr.
+/// See the module documentation for Kconfig requirements.
+#[cfg(feature = "ed25519")]
+pub mod ed25519;
 
 /// Re-export ML-KEM types and functions
 pub mod mlkem {
