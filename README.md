@@ -1,5 +1,15 @@
 # Arduino Libraries Rust
 
+> ## **DEPRECATED**
+> 
+> This repository has been replaced by **[DragonWing-rs](https://github.com/FeurJak/DragonWing-rs)**.
+> 
+> Please use the new repository for all future development. This repository is archived and will no longer receive updates.
+> 
+> **Migration:** All libraries have been renamed with `dragonwing-` prefix and reorganized for better maintainability. See the [DragonWing-rs README](https://github.com/FeurJak/DragonWing-rs#readme) for documentation.
+
+---
+
 Rust ports of Arduino libraries for the Arduino Uno Q (STM32U585 MCU + QRB2210 Linux MPU) using Zephyr RTOS.
 
 ## Architecture
